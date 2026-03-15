@@ -5,7 +5,7 @@ Thanks for your interest in making credential wallet discovery a standard.
 ## Getting Started
 
 ```bash
-git clone https://github.com/chongkan/credential-wallet-connector.git
+git clone https://github.com/Attestto-com/credential-wallet-connector.git
 cd credential-wallet-connector
 npm install
 npm run lint    # Type-check
@@ -21,6 +21,7 @@ src/
   types.ts       — TypeScript interfaces
   discover.ts    — Site-side: discoverWallets()
   register.ts    — Wallet-side: registerWallet()
+  verify.ts      — VP verification (DID resolution, signature, issuer trust, revocation)
 ```
 
 ## How to Contribute
