@@ -14,26 +14,80 @@ This package is the **credential exchange layer that comes after**. It connects 
 
 A crypto wallet connector tells you someone owns address `0xabc...`. It cannot tell you that person passed KYC, holds a vLEI credential from GLEIF, or has a verified institutional identity. For any regulated use case — FATF Travel Rule, eIDAS 2.0, AML compliance — you need the identity layer, not just the key.
 
-```
-┌──────────────────────────────────────────────────────────────────┐
-│  1. WalletConnect / Phantom            → address + signer       │
-│  2. identity-resolver           → DIDs, KYC, vLEI, SBTs │
-│  3. identity-bridge        → VP request + verify    │
-└──────────────────────────────────────────────────────────────────┘
-     Existing connectors ──┘    Identity middleware ──┘
-```
+<table>
+<tr>
+<td width="60" align="center"><strong>Step</strong></td>
+<td width="280"><strong>Layer</strong></td>
+<td width="60" align="center"><strong>Role</strong></td>
+<td><strong>Output</strong></td>
+</tr>
+<tr>
+<td align="center">1</td>
+<td>WalletConnect / Phantom</td>
+<td align="center">🔌</td>
+<td>Address + signer</td>
+</tr>
+<tr>
+<td align="center">2</td>
+<td><a href="https://github.com/Attestto-com/identity-resolver">identity-resolver</a></td>
+<td align="center">🔍</td>
+<td>DIDs, KYC status, vLEI, SBTs, domains</td>
+</tr>
+<tr>
+<td align="center">3</td>
+<td><strong>identity-bridge</strong></td>
+<td align="center">🛡️</td>
+<td>VP request + cryptographic verification</td>
+</tr>
+<tr>
+<td colspan="4" align="center"><em>Existing connectors handle step 1. Steps 2–3 are the identity middleware that crypto wallets are missing.</em></td>
+</tr>
+</table>
 
 ### What you get vs. what exists
 
-| | WalletConnect / Dynamic / Wagmi | identity-bridge |
-|---|---|---|
-| **Connects** | Crypto wallets (MetaMask, Phantom) | Credential wallets (Attestto Creds, Credible) |
-| **Protocol** | JSON-RPC (`eth_sign`, `sol_signTransaction`) | W3C CHAPI (`VerifiablePresentation`) |
-| **What flows** | Transactions, message signatures | VCs, VPs, selective disclosure |
-| **Identity model** | Address = identity | DID = identity (method-agnostic) |
-| **Trust model** | "You hold the key" | "A trusted issuer attested this about you" |
-| **Discovery** | EIP-6963 (Ethereum-specific) | `credential-wallet:discover` (chain-agnostic) |
-| **Compliance** | None | CHAPI + DIDComm v2 (eIDAS 2.0, FATF ready) |
+<table>
+<tr>
+<th width="160"></th>
+<th width="320">WalletConnect / Dynamic / Wagmi</th>
+<th width="320">identity-bridge</th>
+</tr>
+<tr>
+<td><strong>Connects</strong></td>
+<td>Crypto wallets (MetaMask, Phantom)</td>
+<td>Credential wallets (Attestto Creds, Credible)</td>
+</tr>
+<tr>
+<td><strong>Protocol</strong></td>
+<td>JSON-RPC (<code>eth_sign</code>, <code>sol_signTransaction</code>)</td>
+<td>W3C CHAPI (<code>VerifiablePresentation</code>)</td>
+</tr>
+<tr>
+<td><strong>What flows</strong></td>
+<td>Transactions, message signatures</td>
+<td>VCs, VPs, selective disclosure</td>
+</tr>
+<tr>
+<td><strong>Identity model</strong></td>
+<td>Address = identity</td>
+<td>DID = identity (method-agnostic)</td>
+</tr>
+<tr>
+<td><strong>Trust model</strong></td>
+<td>"You hold the key"</td>
+<td>"A trusted issuer attested this about you"</td>
+</tr>
+<tr>
+<td><strong>Discovery</strong></td>
+<td>EIP-6963 (Ethereum-specific)</td>
+<td><code>credential-wallet:discover</code> (chain-agnostic)</td>
+</tr>
+<tr>
+<td><strong>Compliance</strong></td>
+<td>None</td>
+<td>CHAPI + DIDComm v2 (eIDAS 2.0, FATF ready)</td>
+</tr>
+</table>
 
 ### The full stack
 
@@ -41,9 +95,44 @@ A crypto wallet connector tells you someone owns address `0xabc...`. It cannot t
 2. **[identity-resolver](https://github.com/Attestto-com/identity-resolver)** → resolve that address → find SNS domain, Attestto credentials, Civic pass, vLEI attestation
 3. **identity-bridge** → discover credential wallet extensions → request VP → verify cryptographically
 
-Step 1 uses existing connectors. Steps 2–3 are what we built — the identity middleware that MetaMask, Phantom, and every crypto wallet are currently missing.
+### How this relates to existing standards and tools
 
-The closest existing standard is [W3C CHAPI](https://w3c-ccg.github.io/credential-handler-api/) (Credential Handler API), but CHAPI defines the browser API — not the discovery protocol. We built the discovery layer on top, modeled after [EIP-6963](https://eips.ethereum.org/EIPS/eip-6963) for credential wallets instead of Ethereum wallets. As the EU (eIDAS 2.0) and other jurisdictions move toward digital identity wallets, this stack is already compliant.
+Several projects touch parts of this problem. None cover the same surface.
+
+<table>
+<tr>
+<th width="200">Project</th>
+<th width="280">What it does</th>
+<th>What it doesn't do</th>
+</tr>
+<tr>
+<td><a href="https://w3c-fedid.github.io/digital-credentials/">W3C Digital Credentials API</a><br><em>Chrome 141 + Safari 26</em></td>
+<td>Native <code>navigator.credentials.get({ digital })</code> — routes credential requests to the <strong>OS wallet</strong> (Apple Wallet, Google Wallet)</td>
+<td>Does not discover <strong>browser extension</strong> wallets. Only mediates between the page and the OS credential store.</td>
+</tr>
+<tr>
+<td><a href="https://chapi.io/">W3C CHAPI polyfill</a><br><code>credential-handler-polyfill</code></td>
+<td>Polyfills <code>navigator.credentials</code> for VC exchange via a centralized mediator (<code>credential.mediator.org</code>)</td>
+<td>No direct extension-to-page discovery. Relies on a third-party mediator service. No VP verification.</td>
+</tr>
+<tr>
+<td><a href="https://github.com/walt-id/waltid-identity">walt.id</a></td>
+<td>Full-stack identity platform — issuer, verifier, wallet services with OID4VP v1</td>
+<td>Enterprise platform, not a lightweight npm package. You adopt their full stack or nothing.</td>
+</tr>
+<tr>
+<td><a href="https://github.com/openwallet-foundation/credo-ts">Credo-ts</a><br><em>(OpenWallet Foundation)</em></td>
+<td>DIDComm v2 + OID4VP framework for Node.js and React Native agents</td>
+<td>No browser extension discovery. Designed for server agents and mobile wallets.</td>
+</tr>
+<tr>
+<td><a href="https://spruceid.com/products/sprucekit">SpruceKit</a></td>
+<td>Sign-In with Ethereum (SIWE) + credential issuance + off-chain data vaults</td>
+<td>Ethereum-first. Authentication-centric, not a general credential wallet discovery protocol.</td>
+</tr>
+</table>
+
+**Where identity-bridge fits:** The W3C Digital Credentials API routes to OS-level wallets. identity-bridge discovers **browser extension** wallets — the same gap [EIP-6963](https://eips.ethereum.org/EIPS/eip-6963) filled for Ethereum wallets when `window.ethereum` only supported one provider at a time. As DC-API matures for OS wallets and CHAPI standardizes the browser API, identity-bridge provides the missing extension discovery layer with built-in VP verification that neither standard includes.
 
 ## Install
 
@@ -118,26 +207,45 @@ registerWallet({
 
 ## How It Works
 
-```
-┌─────────────────────────────────────────────────────────┐
-│  Website                                                │
-│                                                         │
-│  1. dispatchEvent('credential-wallet:discover')         │
-│                       ↓                                 │
-│  ┌────────────────────┼────────────────────┐            │
-│  │  Extension A        │  Extension B       │           │
-│  │  (Attestto Creds)   │  (Credible)        │           │
-│  │         ↓           │        ↓           │           │
-│  │  announce w/ DID    │  announce w/ DID   │           │
-│  └────────────────────┼────────────────────┘            │
-│                       ↓                                 │
-│  2. Collect announcements (800ms window)                │
-│  3. Show wallet picker to user                          │
-│  4. User picks → navigator.credentials.get (CHAPI)     │
-│  5. Verify VP → resolve holder DID → check signature    │
-│     → check issuer trust → check revocation             │
-└─────────────────────────────────────────────────────────┘
-```
+<table>
+<tr>
+<td width="40" align="center"><strong>1</strong></td>
+<td>Site dispatches <code>credential-wallet:discover</code> event</td>
+</tr>
+<tr>
+<td align="center">↓</td>
+<td></td>
+</tr>
+<tr>
+<td width="40" align="center"><strong>2</strong></td>
+<td>Each installed extension responds with <code>credential-wallet:announce</code> containing its DID + metadata</td>
+</tr>
+<tr>
+<td></td>
+<td>
+<table>
+<tr><td>Extension A (Attestto Creds) → announces <code>did:web:attestto.com:wallets:attestto-creds</code></td></tr>
+<tr><td>Extension B (Credible) → announces <code>did:web:credible.dev:wallets:credible</code></td></tr>
+</table>
+</td>
+</tr>
+<tr>
+<td align="center"><strong>3</strong></td>
+<td>Site collects all announcements (800ms window)</td>
+</tr>
+<tr>
+<td align="center"><strong>4</strong></td>
+<td>Site shows wallet picker — user chooses</td>
+</tr>
+<tr>
+<td align="center"><strong>5</strong></td>
+<td><code>navigator.credentials.get()</code> → wallet returns a Verifiable Presentation</td>
+</tr>
+<tr>
+<td align="center"><strong>6</strong></td>
+<td>Site verifies VP → resolve holder DID → check signature → check issuer trust → check revocation</td>
+</tr>
+</table>
 
 ## API
 
@@ -306,12 +414,28 @@ The site will verify your VP by resolving the holder's DID and checking the sign
 
 ## Supported Protocols
 
-| Protocol | Description |
-|---|---|
-| `chapi` | W3C Credential Handler API — `navigator.credentials.get()` |
-| `didcomm-v2` | DIDComm v2 Present Proof 3.0 |
-| `oid4vp` | OpenID for Verifiable Presentations |
-| `waci-didcomm` | Wallet And Credential Interaction via DIDComm |
+<table>
+<tr>
+<th width="160">Protocol</th>
+<th>Description</th>
+</tr>
+<tr>
+<td><code>chapi</code></td>
+<td>W3C Credential Handler API — <code>navigator.credentials.get()</code></td>
+</tr>
+<tr>
+<td><code>didcomm-v2</code></td>
+<td>DIDComm v2 Present Proof 3.0</td>
+</tr>
+<tr>
+<td><code>oid4vp</code></td>
+<td>OpenID for Verifiable Presentations</td>
+</tr>
+<tr>
+<td><code>waci-didcomm</code></td>
+<td>Wallet And Credential Interaction via DIDComm</td>
+</tr>
+</table>
 
 ## Security
 
