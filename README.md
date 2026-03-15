@@ -4,6 +4,47 @@ Universal discovery protocol for credential wallet browser extensions — like [
 
 Sites broadcast a discovery event, installed wallet extensions announce themselves with their DID identity and metadata. Multiple wallets can coexist — the user always chooses.
 
+## Identity Middleware — not a wallet connector
+
+WalletConnect, Dynamic, and Wagmi are **crypto wallet connectors**. They connect MetaMask, Phantom, and Ledger to dApps for **transaction signing** — send ETH, swap tokens, call contracts. They prove "this person controls this private key." That's where they stop.
+
+This package is the **credential exchange layer that comes after**. It connects **credential wallets** — Attestto Creds, Credible, Trinsic — to sites for **Verifiable Presentations**. It proves "a trusted issuer attested this about you" with field-level selective disclosure and cryptographic verification.
+
+### Why this matters
+
+A crypto wallet connector tells you someone owns address `0xabc...`. It cannot tell you that person passed KYC, holds a vLEI credential from GLEIF, or has a verified institutional identity. For any regulated use case — FATF Travel Rule, eIDAS 2.0, AML compliance — you need the identity layer, not just the key.
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│  1. WalletConnect / Phantom            → address + signer       │
+│  2. wallet-identity-resolver           → DIDs, KYC, vLEI, SBTs │
+│  3. credential-wallet-connector        → VP request + verify    │
+└──────────────────────────────────────────────────────────────────┘
+     Existing connectors ──┘    Identity middleware ──┘
+```
+
+### What you get vs. what exists
+
+| | WalletConnect / Dynamic / Wagmi | credential-wallet-connector |
+|---|---|---|
+| **Connects** | Crypto wallets (MetaMask, Phantom) | Credential wallets (Attestto Creds, Credible) |
+| **Protocol** | JSON-RPC (`eth_sign`, `sol_signTransaction`) | W3C CHAPI (`VerifiablePresentation`) |
+| **What flows** | Transactions, message signatures | VCs, VPs, selective disclosure |
+| **Identity model** | Address = identity | DID = identity (method-agnostic) |
+| **Trust model** | "You hold the key" | "A trusted issuer attested this about you" |
+| **Discovery** | EIP-6963 (Ethereum-specific) | `credential-wallet:discover` (chain-agnostic) |
+| **Compliance** | None | CHAPI + DIDComm v2 (eIDAS 2.0, FATF ready) |
+
+### The full stack
+
+1. **WalletConnect** → connect Solana/Ethereum wallet → get address
+2. **[wallet-identity-resolver](https://github.com/Attestto-com/wallet-identity-resolver)** → resolve that address → find SNS domain, Attestto credentials, Civic pass, vLEI attestation
+3. **credential-wallet-connector** → discover credential wallet extensions → request VP → verify cryptographically
+
+Step 1 uses existing connectors. Steps 2–3 are what we built — the identity middleware that MetaMask, Phantom, and every crypto wallet are currently missing.
+
+The closest existing standard is [W3C CHAPI](https://w3c-ccg.github.io/credential-handler-api/) (Credential Handler API), but CHAPI defines the browser API — not the discovery protocol. We built the discovery layer on top, modeled after [EIP-6963](https://eips.ethereum.org/EIPS/eip-6963) for credential wallets instead of Ethereum wallets. As the EU (eIDAS 2.0) and other jurisdictions move toward digital identity wallets, this stack is already compliant.
+
 ## Install
 
 ```bash
