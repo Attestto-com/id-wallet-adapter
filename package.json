@@ -1,6 +1,6 @@
 {
-  "name": "identity-bridge",
-  "version": "0.1.0",
+  "name": "@attestto/identity-bridge",
+  "version": "0.1.1",
   "description": "Identity middleware for credential wallet discovery, VP exchange, and cryptographic verification — the identity layer crypto wallets are missing",
   "type": "module",
   "main": "dist/index.cjs",
@@ -13,7 +13,9 @@
       "require": "./dist/index.cjs"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsup src/index.ts --format esm,cjs --dts --clean",
     "lint": "tsc --noEmit",

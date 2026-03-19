@@ -133,7 +133,9 @@ async function verifySignature(vp: Record<string, unknown>, resolverUrl: string,
     const data = await res.json() as { valid?: boolean }
     return data.valid === true
   } catch {
-    return vp.proof !== undefined && vp.proof !== null
+    // Fail closed — if the resolver is unreachable, signature cannot be verified.
+    // Never trust a VP just because it has a proof field.
+    return false
   }
 }
 
