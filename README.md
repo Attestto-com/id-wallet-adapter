@@ -111,44 +111,44 @@ A crypto wallet connector tells you someone owns address `0xabc...`. It cannot t
 2. **[identity-resolver](https://github.com/Attestto-com/identity-resolver)** → resolve that address → find SNS domain, Attestto credentials, Civic pass, vLEI attestation
 3. **id-wallet-adapter** → discover credential wallet extensions → request VP → verify cryptographically
 
-### How this relates to existing standards and tools
+### Where this fits in the ecosystem
 
-Several projects touch parts of this problem. None cover the same surface.
+The identity space has wire protocols (how credentials move) and discovery protocols (how you find the wallet). Most projects focus on the wire. We focus on the discovery.
 
-<table>
-<tr>
-<th width="200">Project</th>
-<th width="280">What it does</th>
-<th>What it doesn't do</th>
-</tr>
-<tr>
-<td><a href="https://w3c-fedid.github.io/digital-credentials/">W3C Digital Credentials API</a><br><em>Chrome 141 + Safari 26</em></td>
-<td>Native <code>navigator.credentials.get({ digital })</code> — routes credential requests to the <strong>OS wallet</strong> (Apple Wallet, Google Wallet)</td>
-<td>Does not discover <strong>browser extension</strong> wallets. Only mediates between the page and the OS credential store.</td>
-</tr>
-<tr>
-<td><a href="https://chapi.io/">W3C CHAPI polyfill</a><br><code>credential-handler-polyfill</code></td>
-<td>Polyfills <code>navigator.credentials</code> for VC exchange via a centralized mediator (<code>credential.mediator.org</code>)</td>
-<td>No direct extension-to-page discovery. Relies on a third-party mediator service. No VP verification.</td>
-</tr>
-<tr>
-<td><a href="https://github.com/walt-id/waltid-identity">walt.id</a></td>
-<td>Full-stack identity platform — issuer, verifier, wallet services with OID4VP v1</td>
-<td>Enterprise platform, not a lightweight npm package. You adopt their full stack or nothing.</td>
-</tr>
-<tr>
-<td><a href="https://github.com/openwallet-foundation/credo-ts">Credo-ts</a><br><em>(OpenWallet Foundation)</em></td>
-<td>DIDComm v2 + OID4VP framework for Node.js and React Native agents</td>
-<td>No browser extension discovery. Designed for server agents and mobile wallets.</td>
-</tr>
-<tr>
-<td><a href="https://spruceid.com/products/sprucekit">SpruceKit</a></td>
-<td>Sign-In with Ethereum (SIWE) + credential issuance + off-chain data vaults</td>
-<td>Ethereum-first. Authentication-centric, not a general credential wallet discovery protocol.</td>
-</tr>
-</table>
+**Wire protocols** define the conversation:
 
-**Where id-wallet-adapter fits:** The W3C Digital Credentials API routes to OS-level wallets. id-wallet-adapter discovers **browser extension** wallets — the same gap [EIP-6963](https://eips.ethereum.org/EIPS/eip-6963) filled for Ethereum wallets when `window.ethereum` only supported one provider at a time. As DC-API matures for OS wallets and CHAPI standardizes the browser API, id-wallet-adapter provides the missing extension discovery layer with built-in VP verification that neither standard includes.
+| Protocol | What it does | Limitation |
+|---|---|---|
+| [OID4VP](https://openid.net/specs/openid-4-verifiable-presentations-1_0.html) | VP exchange via OAuth 2.0 flows, QR codes, deep links | Assumes you already know the wallet. No browser extension discovery. |
+| [DIDComm v2](https://identity.foundation/didcomm-messaging/spec/) | Encrypted peer-to-peer messaging between agents | Designed for server/mobile agents, not browser extensions. |
+| [W3C CHAPI](https://chapi.io/) | Browser mediator for `navigator.credentials` | Central mediator dependency. No late-arrival handling. No custom UI. |
+
+**Discovery protocols** find who to talk to:
+
+| Protocol | What it does | Limitation |
+|---|---|---|
+| [W3C Digital Credentials API](https://w3c-fedid.github.io/digital-credentials/) | Routes to OS wallets (Apple Wallet, Google Wallet) | No browser extension discovery. |
+| [DIF Wallet Rendering](https://identity.foundation/wallet-rendering/) | Standardizes how credentials look (icons, colors, labels) | Not about discovery — complementary. |
+| [EIP-6963](https://eips.ethereum.org/EIPS/eip-6963) | Multi-provider discovery for Ethereum wallets | Ethereum-only. Not for identity wallets. |
+| **id-wallet-adapter** | Discovers browser extension credential wallets, provides interactive picker with late-arrival support | Browser-first. Mobile deep links are out of scope (OID4VP handles that). |
+
+**id-wallet-adapter is the application-layer discovery that triggers wire protocols.** It doesn't replace OID4VP or DIDComm — it finds the wallet, then the site uses whatever wire protocol it needs.
+
+Think of it like DNS vs HTTP. OID4VP is the conversation. We're the lookup.
+
+### The NASCAR problem
+
+Without a discovery protocol, sites end up with a wall of "Connect with [Wallet X]" buttons — the [NASCAR problem](https://indieweb.org/NASCAR_problem). EIP-6963 solved this for Ethereum. id-wallet-adapter solves it for identity wallets.
+
+```ts
+// Before: hardcode every wallet
+if (window.attesttoId) { /* ... */ }
+if (window.credible) { /* ... */ }
+if (window.trinsic) { /* ... */ }
+
+// After: discover all, let the user pick
+const wallet = await pickWallet()
+```
 
 ## Install
 
@@ -158,25 +158,40 @@ npm install @attestto/id-wallet-adapter
 
 ## Quick Start
 
-### Site-side (your web app)
+### Three tiers of usage
 
 ```ts
-import { discoverWallets, verifyPresentation } from '@attestto/id-wallet-adapter'
+import { discoverWallets, pickWallet, verifyPresentation } from '@attestto/id-wallet-adapter'
 
-// 1. Discover installed credential wallets
+// ── Tier 1: Headless — build your own UI ──────────────────
 const wallets = await discoverWallets()
+// You render however you want
 
-if (wallets.length === 0) {
-  // No wallet found — show install prompts
-} else if (wallets.length === 1) {
-  // One wallet — auto-select
-  console.log('Using', wallets[0].name, wallets[0].did)
-} else {
-  // Multiple wallets — show picker
-  wallets.forEach(w => console.log(w.name, w.did, w.protocols))
-}
+// ── Tier 2: Default modal — zero config, vanilla JS ───────
+const wallet = await pickWallet()
+// Built-in modal, framework-agnostic, works everywhere
 
-// 2. After user picks a wallet, request a credential via standard CHAPI
+// ── Tier 3: Custom renderer — bring your own UI ───────────
+const wallet = await pickWallet({
+  render: (onSelect, onCancel) => ({
+    update: (wallets) => { /* re-render your list */ },
+    destroy: () => { /* cleanup DOM */ },
+  })
+})
+```
+
+Late-arriving wallets are pushed to the renderer via `update()` — no stale lists.
+
+### Full example (Tier 2 + verification)
+
+```ts
+import { pickWallet, verifyPresentation } from '@attestto/id-wallet-adapter'
+
+// 1. User picks a wallet from the built-in modal
+const wallet = await pickWallet()
+if (!wallet) return // user cancelled
+
+// 2. Request a credential via standard CHAPI
 const credential = await navigator.credentials.get({
   web: {
     VerifiablePresentation: {
@@ -188,14 +203,13 @@ const credential = await navigator.credentials.get({
 })
 
 // 3. Verify the returned VP cryptographically
-const result = await verifyPresentation(credential, wallets[0], {
+const result = await verifyPresentation(credential, wallet, {
   resolverUrl: 'https://your-backend.com/api/resolver',
   trustedIssuers: ['did:web:attestto.com'],
 })
 
 if (result.valid) {
   console.log('Verified holder:', result.holderDid)
-  console.log('DID Document:', result.didDocument)
 } else {
   console.error('Verification failed:', result.errors)
 }
@@ -230,6 +244,45 @@ Discover all credential wallet extensions. Dispatches a discover event and colle
 ### `registerWallet(wallet: WalletAnnouncement): void`
 
 Register your wallet extension to respond to discovery events. Call once in your content script's MAIN world.
+
+### `pickWallet(options?): Promise<WalletAnnouncement | null>`
+
+Interactive wallet picker with three usage tiers. Returns the selected wallet, or `null` if cancelled / no wallets found.
+
+```ts
+// Default modal — zero config
+const wallet = await pickWallet()
+
+// Filter by protocol — only show OID4VP-capable wallets
+const wallet = await pickWallet({ requiredProtocols: ['oid4vp'] })
+
+// Custom renderer — bring your own UI
+const wallet = await pickWallet({
+  render: (onSelect, onCancel) => ({
+    update: (wallets) => { /* called on each new wallet discovery */ },
+    destroy: () => { /* cleanup */ },
+  })
+})
+```
+
+**Options:**
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `timeoutMs` | `number` | `2000` | How long to wait for wallet announcements |
+| `requiredProtocols` | `WalletProtocol[]` | `[]` | Only show wallets supporting all listed protocols |
+| `render` | `function` | built-in modal | Custom render function (see below) |
+
+**Custom renderer contract:**
+
+```ts
+interface PickerRenderer {
+  update: (wallets: WalletAnnouncement[]) => void  // Called on each new discovery
+  destroy: () => void                                // Called to tear down UI
+}
+```
+
+The `update` callback handles late-arriving wallets — extensions that take a few extra milliseconds to inject. The renderer receives the full cumulative list each time.
 
 ### `verifyPresentation(vp, wallet, options): Promise<VerifyResult>`
 
