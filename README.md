@@ -1,115 +1,53 @@
 # @attestto/id-wallet-adapter
 
-Universal wallet adapter for credential wallet browser extensions — like [EIP-6963](https://eips.ethereum.org/EIPS/eip-6963) but for W3C identity wallets.
+Discovery and verification layer for credential wallet browser extensions — like [EIP-6963](https://eips.ethereum.org/EIPS/eip-6963) but for W3C identity wallets.
 
-Sites broadcast a discovery event, installed wallet extensions announce themselves with their DID identity and metadata. Multiple wallets can coexist — the user always chooses.
-
-```mermaid
-sequenceDiagram
-    participant Site as Website
-    participant A as Extension A<br>(Attestto Creds)
-    participant B as Extension B<br>(Credible)
-
-    Site->>Site: dispatchEvent('credential-wallet:discover')
-    A-->>Site: announce → did:web:attestto.com:wallets:attestto-creds
-    B-->>Site: announce → did:web:credible.dev:wallets:credible
-    Note over Site: Collect announcements (800ms window)
-    Site->>Site: Show wallet picker → user chooses
-    Site->>A: navigator.credentials.get({ VerifiablePresentation })
-    A-->>Site: Returns signed VP
-    Site->>Site: Verify VP → resolve DID → check signature → issuer trust → revocation
+```
+Site calls discoverWallets()
+  → Extensions announce themselves (name, DID, icon, protocols, goals)
+  → Site shows picker (or auto-selects)
+  → User picks a wallet
+  → Site requests a Verifiable Presentation
+  → Wallet returns signed VP
+  → Site verifies: DID resolution → signature → issuer trust → revocation
 ```
 
-## Identity Middleware — not a wallet connector
+## What this is
 
-WalletConnect, Dynamic, and Wagmi are **crypto wallet connectors**. They connect MetaMask, Phantom, and Ledger to dApps for **transaction signing** — send ETH, swap tokens, call contracts. They prove "this person controls this private key." That's where they stop.
+A website needs to verify a user's identity — KYC status, a university degree, a vLEI credential from GLEIF, a government-issued ID. The user has a credential wallet (browser extension or mobile app) that holds these credentials. The site needs to:
 
-This package is the **credential exchange layer that comes after**. It connects **credential wallets** — Attestto Creds, Credible, Trinsic — to sites for **Verifiable Presentations**. It proves "a trusted issuer attested this about you" with field-level selective disclosure and cryptographic verification.
+1. **Discover** which wallet the user has
+2. **Request** a Verifiable Presentation with selective disclosure
+3. **Verify** the cryptographic proof chain
 
-### Why this matters
-
-A crypto wallet connector tells you someone owns address `0xabc...`. It cannot tell you that person passed KYC, holds a vLEI credential from GLEIF, or has a verified institutional identity. For any regulated use case — FATF Travel Rule, eIDAS 2.0, AML compliance — you need the identity layer, not just the key.
+This package handles all three.
 
 <table>
 <tr>
 <td width="60" align="center"><strong>Step</strong></td>
-<td width="280"><strong>Layer</strong></td>
-<td width="60" align="center"><strong>Role</strong></td>
+<td width="280"><strong>What happens</strong></td>
 <td><strong>Output</strong></td>
 </tr>
 <tr>
 <td align="center">1</td>
-<td>WalletConnect / Phantom</td>
-<td align="center">🔌</td>
-<td>Address + signer</td>
+<td><strong>id-wallet-adapter</strong> discovers installed wallets</td>
+<td>List of available credential wallets</td>
 </tr>
 <tr>
 <td align="center">2</td>
-<td><a href="https://github.com/Attestto-com/identity-resolver">identity-resolver</a></td>
-<td align="center">🔍</td>
-<td>DIDs, KYC status, vLEI, SBTs, domains</td>
+<td>User picks a wallet, site requests a VP</td>
+<td>Signed Verifiable Presentation</td>
 </tr>
 <tr>
 <td align="center">3</td>
-<td><strong>id-wallet-adapter</strong></td>
-<td align="center">🛡️</td>
-<td>VP request + cryptographic verification</td>
-</tr>
-<tr>
-<td colspan="4" align="center"><em>Existing connectors handle step 1. Steps 2–3 are the identity middleware that crypto wallets are missing.</em></td>
+<td><strong>id-wallet-adapter</strong> verifies the VP</td>
+<td>Holder DID, issuer trust, revocation status</td>
 </tr>
 </table>
 
-### What you get vs. what exists
+### Why this matters
 
-<table>
-<tr>
-<th width="160"></th>
-<th width="320">WalletConnect / Dynamic / Wagmi</th>
-<th width="320">id-wallet-adapter</th>
-</tr>
-<tr>
-<td><strong>Connects</strong></td>
-<td>Crypto wallets (MetaMask, Phantom)</td>
-<td>Credential wallets (Attestto Creds, Credible)</td>
-</tr>
-<tr>
-<td><strong>Protocol</strong></td>
-<td>JSON-RPC (<code>eth_sign</code>, <code>sol_signTransaction</code>)</td>
-<td>W3C CHAPI (<code>VerifiablePresentation</code>)</td>
-</tr>
-<tr>
-<td><strong>What flows</strong></td>
-<td>Transactions, message signatures</td>
-<td>VCs, VPs, selective disclosure</td>
-</tr>
-<tr>
-<td><strong>Identity model</strong></td>
-<td>Address = identity</td>
-<td>DID = identity (method-agnostic)</td>
-</tr>
-<tr>
-<td><strong>Trust model</strong></td>
-<td>"You hold the key"</td>
-<td>"A trusted issuer attested this about you"</td>
-</tr>
-<tr>
-<td><strong>Discovery</strong></td>
-<td>EIP-6963 (Ethereum-specific)</td>
-<td><code>credential-wallet:discover</code> (chain-agnostic)</td>
-</tr>
-<tr>
-<td><strong>Compliance</strong></td>
-<td>None</td>
-<td>CHAPI + DIDComm v2 (eIDAS 2.0, FATF ready)</td>
-</tr>
-</table>
-
-### The full stack
-
-1. **WalletConnect** → connect Solana/Ethereum wallet → get address
-2. **[identity-resolver](https://github.com/Attestto-com/identity-resolver)** → resolve that address → find SNS domain, Attestto credentials, Civic pass, vLEI attestation
-3. **id-wallet-adapter** → discover credential wallet extensions → request VP → verify cryptographically
+For any regulated use case — FATF Travel Rule, eIDAS 2.0, AML compliance — you need cryptographic proof that a trusted issuer attested something about a person. A password or an OAuth token won't cut it. Verifiable Credentials are the standard. This package is the discovery and verification layer that connects the site to the user's credential wallet.
 
 ### Where this fits in the ecosystem
 
@@ -308,7 +246,7 @@ interface PickerRenderer {
 }
 ```
 
-The `update` callback handles late-arriving wallets — extensions that take a few extra milliseconds to inject. The renderer receives the full cumulative list each time.
+**Late-arriving wallets:** Browser extensions inject content scripts at `document_start`, but some take a few extra milliseconds. If the picker modal is already open and a new wallet announces itself, `update()` fires with the full cumulative list — the UI adds the new wallet in real-time instead of showing a stale list. No reload needed.
 
 ### `verifyPresentation(vp, wallet, options): Promise<VerifyResult>`
 
@@ -346,6 +284,7 @@ interface VerifyError {
   message: string                        // Human-readable description
 }
 
+// Package-defined error codes — use these to handle failures programmatically
 type VerifyErrorCode =
   | 'NO_HOLDER'           // VP has no holder DID
   | 'RESOLUTION_FAILED'   // Could not resolve the holder's DID
@@ -354,6 +293,8 @@ type VerifyErrorCode =
   | 'CREDENTIAL_REVOKED'  // VC revoked via Bitstring Status List
   | 'WALLET_UNTRUSTED'    // Wallet DID not in trustedWallets list
 ```
+
+These codes are defined by this package (not a W3C or DIF standard). They map to the six verification steps. The `message` field provides human-readable context for logging or UI display.
 
 ### `WalletAnnouncement`
 
