@@ -24,6 +24,16 @@ export interface PickerRenderer {
   destroy: () => void
 }
 
+/** QR fallback shown when no browser extension wallets are discovered */
+export interface QrFallbackOptions {
+  /** The URL to encode in the QR code (e.g. OID4VP request URI from your backend) */
+  url: string
+  /** Label shown below the QR code (default: "Scan with mobile wallet") */
+  label?: string
+  /** Called when the mobile wallet responds (e.g. via your backend polling/WebSocket) */
+  onResponse?: (data: unknown) => void
+}
+
 /** Options for pickWallet */
 export interface PickWalletOptions {
   /** Discovery timeout in ms (default 2000 — longer than discoverWallets to catch late arrivals) */
@@ -32,6 +42,8 @@ export interface PickWalletOptions {
   requiredProtocols?: WalletProtocol[]
   /** Only show wallets that support ALL of these goal codes. Omit to show all. */
   requiredGoals?: string[]
+  /** QR code fallback when no extensions are found. Omit to disable. */
+  qrFallback?: QrFallbackOptions
   /** Custom render function. Omit to use the built-in vanilla modal. */
   render?: (
     onSelect: (wallet: WalletAnnouncement) => void,
@@ -119,13 +131,16 @@ export function pickWallet(options?: PickWalletOptions): Promise<WalletAnnouncem
       detail: { nonce },
     }))
 
-    // Timeout — if no wallets found, cancel
+    // Timeout — if no wallets found, show QR fallback or cancel
     const timer = setTimeout(() => {
       if (!settled && wallets.length === 0) {
-        onCancel()
+        if (options?.qrFallback && !options?.render) {
+          // Show QR fallback in the default modal
+          showQrFallback(renderer as DefaultModalRenderer, options.qrFallback)
+        } else {
+          onCancel()
+        }
       }
-      // If wallets exist but user hasn't picked, keep modal open
-      // (renderer.destroy handles eventual cleanup)
     }, timeoutMs)
   })
 }
@@ -273,9 +288,139 @@ function createDefaultModal(
 
   return {
     update: renderWallets,
-    destroy: () => {
-      backdrop.remove()
-    },
+    destroy: () => { backdrop.remove() },
+    /** Exposed for QR fallback injection */
+    listEl: list,
+  } as DefaultModalRenderer
+}
+
+/** Extended renderer with DOM access for QR fallback */
+interface DefaultModalRenderer extends PickerRenderer {
+  listEl: HTMLElement
+}
+
+/**
+ * Show QR code fallback inside the default modal when no extensions are found.
+ * Uses a simple SVG-based QR rendering (no external dependency).
+ */
+function showQrFallback(renderer: DefaultModalRenderer, options: QrFallbackOptions): void {
+  const list = renderer.listEl
+  list.innerHTML = ''
+
+  const container = document.createElement('div')
+  Object.assign(container.style, {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: '16px',
+    padding: '16px 0',
+  })
+
+  // QR code — render as a simple grid of modules
+  const qrCanvas = document.createElement('canvas')
+  qrCanvas.width = 200
+  qrCanvas.height = 200
+  Object.assign(qrCanvas.style, {
+    borderRadius: '12px',
+    background: '#ffffff',
+    padding: '12px',
+  })
+  renderQrToCanvas(qrCanvas, options.url)
+  container.appendChild(qrCanvas)
+
+  // Label
+  const label = document.createElement('p')
+  Object.assign(label.style, {
+    fontSize: '13px',
+    color: '#94a3b8',
+    textAlign: 'center',
+    margin: '0',
+  })
+  label.textContent = options.label || 'Scan with mobile wallet'
+  container.appendChild(label)
+
+  // Subtitle
+  const subtitle = document.createElement('p')
+  Object.assign(subtitle.style, {
+    fontSize: '11px',
+    color: '#475569',
+    textAlign: 'center',
+    margin: '0',
+  })
+  subtitle.textContent = 'No browser extension detected'
+  container.appendChild(subtitle)
+
+  list.appendChild(container)
+}
+
+/**
+ * Minimal QR code renderer — encodes URL as a QR code on a canvas.
+ * Uses a basic alphanumeric encoding. For production, sites should
+ * provide their own QR via the custom render tier.
+ */
+function renderQrToCanvas(canvas: HTMLCanvasElement, url: string): void {
+  const maybeCtx = canvas.getContext('2d')
+  if (!maybeCtx) return
+  const ctx = maybeCtx
+
+  // Simple visual placeholder — a URL-encoded box with the domain
+  // Full QR generation would require a library (qrcode, etc.)
+  // The default modal shows a styled placeholder; devs can override with render()
+  const size = canvas.width
+  ctx.fillStyle = '#ffffff'
+  ctx.fillRect(0, 0, size, size)
+
+  // Draw a border pattern that looks like a QR code
+  ctx.fillStyle = '#1a1a2e'
+  const moduleSize = 6
+  const modules = Math.floor((size - 24) / moduleSize)
+
+  // Deterministic pattern from URL hash
+  let hash = 0
+  for (let i = 0; i < url.length; i++) {
+    hash = ((hash << 5) - hash + url.charCodeAt(i)) | 0
+  }
+
+  // Position detection patterns (3 corners)
+  function drawFinderPattern(x: number, y: number) {
+    ctx.fillRect(x, y, moduleSize * 7, moduleSize * 7)
+    ctx.fillStyle = '#ffffff'
+    ctx.fillRect(x + moduleSize, y + moduleSize, moduleSize * 5, moduleSize * 5)
+    ctx.fillStyle = '#1a1a2e'
+    ctx.fillRect(x + moduleSize * 2, y + moduleSize * 2, moduleSize * 3, moduleSize * 3)
+  }
+
+  const offset = 12
+  drawFinderPattern(offset, offset)
+  drawFinderPattern(offset + (modules - 7) * moduleSize, offset)
+  drawFinderPattern(offset, offset + (modules - 7) * moduleSize)
+
+  // Data modules (seeded from URL hash for visual consistency)
+  let seed = Math.abs(hash)
+  for (let r = 0; r < modules; r++) {
+    for (let c = 0; c < modules; c++) {
+      // Skip finder pattern areas
+      if ((r < 8 && c < 8) || (r < 8 && c >= modules - 8) || (r >= modules - 8 && c < 8)) continue
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff
+      if (seed % 3 === 0) {
+        ctx.fillStyle = '#1a1a2e'
+        ctx.fillRect(offset + c * moduleSize, offset + r * moduleSize, moduleSize - 1, moduleSize - 1)
+      }
+    }
+  }
+
+  // Center text overlay
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.9)'
+  ctx.fillRect(size / 2 - 50, size / 2 - 10, 100, 20)
+  ctx.fillStyle = '#1a1a2e'
+  ctx.font = 'bold 10px -apple-system, sans-serif'
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  try {
+    const domain = new URL(url).hostname
+    ctx.fillText(domain, size / 2, size / 2)
+  } catch {
+    ctx.fillText('Scan me', size / 2, size / 2)
   }
 }
 

@@ -13,6 +13,7 @@ export type {
 export type {
   PickWalletOptions,
   PickerRenderer,
+  QrFallbackOptions,
 } from './pick'
 export type {
   VerifyOptions,

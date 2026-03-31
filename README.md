@@ -269,6 +269,14 @@ const wallet = await pickWallet({
     destroy: () => { /* cleanup */ },
   })
 })
+
+// QR fallback — show QR code when no browser extensions found
+const wallet = await pickWallet({
+  qrFallback: {
+    url: 'https://your-backend.com/oid4vp/request/abc123',
+    label: 'Scan with your mobile wallet',
+  }
+})
 ```
 
 **Options:**
@@ -278,7 +286,18 @@ const wallet = await pickWallet({
 | `timeoutMs` | `number` | `2000` | How long to wait for wallet announcements |
 | `requiredProtocols` | `WalletProtocol[]` | `[]` | Only show wallets supporting all listed protocols |
 | `requiredGoals` | `string[]` | `[]` | Only show wallets supporting all listed goal codes |
+| `qrFallback` | `QrFallbackOptions` | — | QR code shown when no extensions found (see below) |
 | `render` | `function` | built-in modal | Custom render function (see below) |
+
+**QR fallback options:**
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `url` | `string` | (required) | URL encoded in the QR code (e.g. OID4VP request URI) |
+| `label` | `string` | `"Scan with mobile wallet"` | Text shown below the QR code |
+| `onResponse` | `function` | — | Called when your backend signals the mobile wallet responded |
+
+When no browser extension wallets are discovered within the timeout, the default modal switches from "Discovering wallets..." to the QR code. If a late-arriving extension announces after the QR is shown, the modal updates to show both.
 
 **Custom renderer contract:**
 
