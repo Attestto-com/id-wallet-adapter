@@ -58,3 +58,51 @@ export interface AnnounceDetail {
   /** The wallet's self-description */
   wallet: WalletAnnouncement
 }
+
+// ---------------------------------------------------------------------------
+// Signing
+// ---------------------------------------------------------------------------
+
+/** What the site wants signed */
+export interface SignRequest {
+  /** Content hash (hex) to sign */
+  hash: string
+  /** Human-readable document name (shown in consent popup) */
+  fileName: string
+  /** Hash algorithm used (e.g. 'SHA-256') */
+  hashAlgorithm: string
+  /** Optional file size in bytes (for display) */
+  fileSize?: number
+}
+
+/** What the wallet returns after user consents */
+export interface SignResponse {
+  /** Whether the user approved the signature */
+  approved: boolean
+  /** Signer's DID (present when approved) */
+  did?: string
+  /** Base64url-encoded signature value (present when approved) */
+  signature?: string
+  /** Signer's public key in JWK format (present when approved) */
+  publicKeyJwk?: JsonWebKey
+  /** ISO 8601 timestamp of signature creation (present when approved) */
+  timestamp?: string
+}
+
+/** Payload of the sign event (site → wallet) */
+export interface SignDetail {
+  /** Nonce to correlate request → response */
+  nonce: string
+  /** DID of the target wallet */
+  walletDid: string
+  /** The signing request */
+  request: SignRequest
+}
+
+/** Payload of the sign-response event (wallet → site) */
+export interface SignResponseDetail {
+  /** Correlates to the sign nonce */
+  nonce: string
+  /** The signing result */
+  response: SignResponse
+}

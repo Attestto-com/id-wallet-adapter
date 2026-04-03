@@ -39,7 +39,10 @@
     "type": "git",
     "url": "https://github.com/Attestto-com/id-wallet-adapter.git"
   },
-  "author": "Eduardo Chongkan",
+  "author": "Eduardo Chongkan <eduardo@attestto.com>",
+  "contributors": [
+    "Guillermo Chavarria <guillermocc@attestto.com>"
+  ],
   "devDependencies": {
     "tsup": "^8.0.0",
     "typescript": "^5.4.0"

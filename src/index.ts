@@ -1,14 +1,19 @@
 export { discoverWallets } from './discover'
 export { registerWallet } from './register'
 export { pickWallet } from './pick'
+export { requestSignature } from './sign'
 export { verifyPresentation } from './verify'
-export { DISCOVER_EVENT, ANNOUNCE_EVENT } from './constants'
+export { DISCOVER_EVENT, ANNOUNCE_EVENT, SIGN_EVENT, SIGN_RESPONSE_EVENT } from './constants'
 export type {
   WalletAnnouncement,
   WalletProtocol,
   WalletMaintainer,
   DiscoverDetail,
   AnnounceDetail,
+  SignRequest,
+  SignResponse,
+  SignDetail,
+  SignResponseDetail,
 } from './types'
 export type {
   PickWalletOptions,
@@ -21,3 +26,6 @@ export type {
   VerifyError,
   VerifyErrorCode,
 } from './verify'
+export type {
+  RequestSignatureOptions,
+} from './sign'

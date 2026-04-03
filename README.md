@@ -319,12 +319,66 @@ interface WalletMaintainer {
 }
 ```
 
+### `requestSignature(wallet, request, options?): Promise<SignResponse | null>`
+
+Request a document signature from a specific wallet. The wallet extension receives the request, shows a consent popup, and responds with the DID signature. Returns `null` if the user rejects or the timeout elapses.
+
+```ts
+import { discoverWallets, requestSignature } from '@attestto/id-wallet-adapter'
+
+const [wallet] = await discoverWallets()
+const result = await requestSignature(wallet, {
+  hash: 'abc123...',           // SHA-256 hex
+  fileName: 'contract.pdf',
+  hashAlgorithm: 'SHA-256',
+  fileSize: 9912,              // optional
+})
+
+if (result?.approved) {
+  console.log('Signed by', result.did)
+  console.log('Signature:', result.signature)
+}
+```
+
+**Request:**
+
+| Field | Type | Description |
+|---|---|---|
+| `hash` | `string` | Content hash (hex) to sign |
+| `fileName` | `string` | Human-readable document name (shown in consent popup) |
+| `hashAlgorithm` | `string` | Hash algorithm used (e.g. `'SHA-256'`) |
+| `fileSize` | `number?` | Optional file size in bytes (for display) |
+
+**Response:**
+
+| Field | Type | Description |
+|---|---|---|
+| `approved` | `boolean` | Whether the user approved the signature |
+| `did` | `string?` | Signer's DID (present when approved) |
+| `signature` | `string?` | Base64url-encoded signature value |
+| `publicKeyJwk` | `JsonWebKey?` | Signer's public key in JWK format |
+| `timestamp` | `string?` | ISO 8601 timestamp of signature creation |
+
+**Options:**
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `timeoutMs` | `number` | `120000` | How long to wait for the wallet to respond |
+
+**Protocol:** Uses the same nonce-based CustomEvent pattern as discovery:
+1. Site dispatches `credential-wallet:sign` with nonce + request
+2. Wallet extension shows consent popup
+3. Wallet responds with `credential-wallet:sign-response` + nonce + result
+
 ### Event Constants
 
 ```ts
-import { DISCOVER_EVENT, ANNOUNCE_EVENT } from '@attestto/id-wallet-adapter'
-// 'credential-wallet:discover'
-// 'credential-wallet:announce'
+import {
+  DISCOVER_EVENT,         // 'credential-wallet:discover'
+  ANNOUNCE_EVENT,         // 'credential-wallet:announce'
+  SIGN_EVENT,             // 'credential-wallet:sign'
+  SIGN_RESPONSE_EVENT,    // 'credential-wallet:sign-response'
+} from '@attestto/id-wallet-adapter'
 ```
 
 ## Writing a Custom Wallet Integration
@@ -399,7 +453,36 @@ function buildVerifiablePresentation(request) {
 }
 ```
 
-### Step 4 — Verify your DID is resolvable
+### Step 4 — Handle signing requests
+
+Listen for `credential-wallet:sign` events and respond with the signature:
+
+```ts
+// content-script.ts (MAIN world)
+window.addEventListener('credential-wallet:sign', async (e) => {
+  const { nonce, walletDid, request } = e.detail
+  if (walletDid !== YOUR_WALLET_DID) return
+
+  // Show consent popup to the user
+  const approved = await showSignConsent(request.fileName, request.hash)
+
+  // Sign and respond
+  const signature = approved ? await signWithUserKey(request.hash) : null
+  window.dispatchEvent(new CustomEvent('credential-wallet:sign-response', {
+    detail: {
+      nonce,
+      response: {
+        approved,
+        did: approved ? userDid : undefined,
+        signature: approved ? signature : undefined,
+        timestamp: approved ? new Date().toISOString() : undefined,
+      }
+    }
+  }))
+})
+```
+
+### Step 5 — Verify your DID is resolvable
 
 The site will verify your VP by resolving the holder's DID and checking the signature against the public key in the DID Document. Make sure:
 
@@ -473,7 +556,13 @@ One return object, multiple wire protocols. The wallet adapter becomes the unifi
 
 ## See It In Action
 
-The [DID Landscape Explorer](https://github.com/chongkan/did-landscape-explorer) uses this package in its self-assessment wizard. The Identity step discovers installed wallets and lets users present their DID.
+| Demo | What | Link |
+|------|------|------|
+| **Verify & Sign** | Live playground with the actual components — drop a PDF, sign it | [verify.attestto.com/docs](https://verify.attestto.com/docs) |
+| **@attestto/verify** | Web Components that use this adapter for wallet discovery + signing | [GitHub](https://github.com/attestto/verify) |
+| **DID Landscape Explorer** | Self-assessment wizard with wallet picker and CHAPI flow | [GitHub](https://github.com/chongkan/did-landscape-explorer) |
+
+**Debug logging:** Open the console on any page using this adapter and run `Attestto.debug = true` to see the full discovery and signing flow with numbered steps.
 
 ## Contributing
 
