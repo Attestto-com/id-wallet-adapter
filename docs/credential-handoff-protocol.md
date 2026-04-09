@@ -178,11 +178,50 @@ await pushCredentialToWallet(wallets[0], result.offer.vc)
 
 ## 7. Security considerations
 
-1. **The page is a trust boundary**. The holder is trusting the landing page to (a) not exfiltrate the fragment, (b) hand the VC only to the wallet they pick. Source-available pages with reproducible builds are strongly preferred. The reference page at `verify.attestto.com/offer/` is open source.
-2. **The fragment lives in browser history**. A holder who clicks an offer URL on a shared device leaves that URL in history. Issuers handing high-value credentials should consider one-time URLs (rotate the encoded VC after first use, e.g. by re-issuing).
-3. **The fragment is not encrypted to the holder**. Anyone with the URL can hand the credential to a wallet. Confidentiality of the URL is the issuer-to-holder channel's responsibility (signed email, end-to-end encrypted chat, in-person QR, etc.).
-4. **The preview is public**. Treat it as you would treat the subject line of an unencrypted email. See §4.3.
-5. **The `vc` is opaque to the page**, but the wallet that receives it is responsible for verifying the issuer signature, checking revocation, and gating storage on user consent. The protocol does not weaken any of those wallet-side checks.
+### 7.1 Threat model summary
+
+A bad actor can control the URL a victim clicks. They control the `vc=` payload, the `preview=` payload, the channel that delivers the URL, and the framing in which it is shared. The page that receives the URL has **no way to validate the issuer claim before the wallet runs**, by design — the page is content-blind.
+
+Six attack scenarios were considered when v1 was drafted:
+
+| # | Severity | Scenario |
+|---|---|---|
+| 1 | 🔴 | **Confidence-trick phishing via attacker-controlled teaser**. The `preview` says "issuer: Tribunal Supremo de Elecciones", the page renders that label inside trusted chrome, the user assumes the page validated it. |
+| 2 | 🟠 | **Malicious VC payload** (XSS in claim values, parser DoS, JSON-LD context SSRF, prototype pollution). |
+| 3 | 🟠 | **Spoofed wallet via discovery protocol** — a malicious extension registers itself with a familiar name and icon. |
+| 4 | 🟡 | **VC targeted at a specific wallet vulnerability**. The page is the delivery vector but the bug is in the wallet. |
+| 5 | 🟡 | **Iframe / cross-site silent push** — already mitigated by requiring an explicit user click and the wallet's own consent prompt. |
+| 6 | 🟢 | **XSS via preview rendered as innerHTML** — already mitigated; reference impl renders every preview field via `textContent`. |
+
+### 7.2 Hard rules — page MUST
+
+1. **The page is a trust boundary**. Source-available pages with reproducible builds are strongly preferred. The reference page at `verify.attestto.com/offer/` is open source under Apache 2.0.
+2. **The page MUST render preview fields via safe text APIs only** (e.g. `textContent` in DOM, never `innerHTML`, never templating that auto-decodes HTML entities).
+3. **The page MUST surface a clearly visible "this preview is unverified" warning** above the rendered preview, in user-facing language, before any action button. The user's mental model must be: *the page is a transport, the wallet is the verifier*.
+4. **The page MUST require an explicit user gesture** (click, key press) to push the credential to a wallet. Auto-push on page load is forbidden.
+5. **The page SHOULD use a two-step confirm flow** for the push action: a first interaction that reveals "what is going to happen" details, followed by a second, distinct interaction that actually triggers the push. This is not a hard MUST because some low-risk flows (e.g. a hospital giving a patient a vaccination record after in-person verification) may justify a one-click experience.
+6. **The page MUST NOT add analytics or telemetry that captures any portion of the URL fragment**. The reference implementation captures none.
+7. **The page SHOULD surface a provenance hint** (e.g. `document.referrer` host, or an explicit "origin unknown" label) so the user can sanity-check the source.
+
+### 7.3 Hard rules — wallet MUST
+
+The page hands the VC to the wallet via the wallet's own credential offer / push protocol (postMessage, browser API, native intent, etc.). What the wallet does with that VC is the trust gate of the entire protocol. Wallets compliant with this spec MUST:
+
+1. **Verify the issuer signature** against the issuer's published DID document (or other resolution mechanism appropriate to the credential format) before storing the credential. Wallets that store offered credentials without signature verification are **non-compliant** with this spec.
+2. **Check revocation** if the credential supports it (status list, RevReg, etc.).
+3. **Show the user the verified issuer name and key** (resolved from the DID document, **not** the value of `preview.issuer`) when asking for storage consent.
+4. **Show the user the verified credential type and claims** (extracted from the VC, **not** from `preview`) when asking for storage consent.
+5. **Treat the `preview` as untrusted hint metadata only** — it is acceptable to display it for orientation, but it MUST NOT be presented as if it had been validated.
+6. **Refuse to store unsigned, malformed, or invalid VCs** without negotiation. Surfacing the failure to the user is acceptable; silent storage is not.
+7. **Sanitize all VC claim string values as untrusted user input** when rendering them in the wallet UI later.
+8. **Not auto-present the offered credential to verifiers without user consent** — a stored credential is not an authorization to present it.
+
+### 7.4 Other considerations
+
+1. **The fragment lives in browser history**. A holder who clicks an offer URL on a shared device leaves that URL in history. Issuers handing high-value credentials should consider one-time URLs (rotate the encoded VC after first use, e.g. by re-issuing).
+2. **The fragment is not encrypted to the holder**. Anyone with the URL can hand the credential to a wallet. Confidentiality of the URL is the issuer-to-holder channel's responsibility (signed email, end-to-end encrypted chat, in-person QR, etc.).
+3. **The preview is public**. Treat it as you would treat the subject line of an unencrypted email. See §4.3.
+4. **Wallet announcement spoofing** in the discovery protocol is a known gap as of v1. The current `discoverWallets()` flow does not require wallets to sign their announcement payload, so a malicious extension can register with a familiar name and icon. Mitigation is being designed for v0.5 of `@attestto/id-wallet-adapter` and is not part of the current credential-handoff protocol surface. Until then, holders must rely on having installed a trusted wallet from a trusted source.
 
 ## 8. Privacy considerations
 
