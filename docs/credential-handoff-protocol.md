@@ -202,6 +202,15 @@ Six attack scenarios were considered when v1 was drafted:
 5. **The page SHOULD use a two-step confirm flow** for the push action: a first interaction that reveals "what is going to happen" details, followed by a second, distinct interaction that actually triggers the push. This is not a hard MUST because some low-risk flows (e.g. a hospital giving a patient a vaccination record after in-person verification) may justify a one-click experience.
 6. **The page MUST NOT add analytics or telemetry that captures any portion of the URL fragment**. The reference implementation captures none.
 7. **The page SHOULD surface a provenance hint** (e.g. `document.referrer` host, or an explicit "origin unknown" label) so the user can sanity-check the source.
+8. **The page MUST NOT render a picker of uninstalled wallets** (the *no-picker rule*). `discoverWallets()` returns only wallets that announced themselves at runtime; the page renders that result faithfully — one, two, however many the user actually has installed. Pages MUST NOT advertise additional wallets the user does not have, MUST NOT hard-code a list of "supported wallets" beyond the discovery result, and MUST NOT present the discovery result as a brand catalog.
+
+   The antipattern this rule rejects is the wallet-picker dialog common in some Web3 ecosystems — a scrollable list of 10–20 wallet brands shown regardless of installation state, with a "Less options" affordance to hide the long tail. That pattern is hostile on three axes simultaneously:
+
+   - **User-hostile** — induces decision fatigue and trains the user to perceive identity as a vendor-shopping problem rather than a credential-presentation problem.
+   - **Project-hostile** — concentrates surface area on whichever projects pay for top placement in the picker, recreating the lock-in the open protocol was meant to avoid.
+   - **Team-hostile** — raises the bar for any new wallet team to become "visible" enough to be added to the canonical picker list, even though the protocol itself is permissionless.
+
+   The no-picker rule keeps the protocol **team-friendly** (any team can ship a wallet that plugs in without asking permission), **project-friendly** (no project gets preferential placement on landing pages), and **user-friendly** (the user sees exactly what they actually have, never more, never less).
 
 ### 7.3 Hard rules — wallet MUST
 
