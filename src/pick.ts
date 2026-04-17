@@ -354,73 +354,50 @@ function showQrFallback(renderer: DefaultModalRenderer, options: QrFallbackOptio
 }
 
 /**
- * Minimal QR code renderer — encodes URL as a QR code on a canvas.
- * Uses a basic alphanumeric encoding. For production, sites should
- * provide their own QR via the custom render tier.
+ * Renders a QR fallback card on a canvas. Does NOT generate a scannable QR —
+ * shows the URL as readable text with a visual frame. Integrators who need a
+ * real QR should use the `render()` tier with a library like `qrcode`.
  */
 function renderQrToCanvas(canvas: HTMLCanvasElement, url: string): void {
   const maybeCtx = canvas.getContext('2d')
   if (!maybeCtx) return
   const ctx = maybeCtx
 
-  // Simple visual placeholder — a URL-encoded box with the domain
-  // Full QR generation would require a library (qrcode, etc.)
-  // The default modal shows a styled placeholder; devs can override with render()
   const size = canvas.width
+
+  // Background
   ctx.fillStyle = '#ffffff'
   ctx.fillRect(0, 0, size, size)
 
-  // Draw a border pattern that looks like a QR code
+  // Border frame
+  ctx.strokeStyle = '#1a1a2e'
+  ctx.lineWidth = 3
+  ctx.strokeRect(8, 8, size - 16, size - 16)
+
+  // Icon — small square in top-left to hint at QR purpose
   ctx.fillStyle = '#1a1a2e'
-  const moduleSize = 6
-  const modules = Math.floor((size - 24) / moduleSize)
-
-  // Deterministic pattern from URL hash
-  let hash = 0
-  for (let i = 0; i < url.length; i++) {
-    hash = ((hash << 5) - hash + url.charCodeAt(i)) | 0
-  }
-
-  // Position detection patterns (3 corners)
-  function drawFinderPattern(x: number, y: number) {
-    ctx.fillRect(x, y, moduleSize * 7, moduleSize * 7)
-    ctx.fillStyle = '#ffffff'
-    ctx.fillRect(x + moduleSize, y + moduleSize, moduleSize * 5, moduleSize * 5)
-    ctx.fillStyle = '#1a1a2e'
-    ctx.fillRect(x + moduleSize * 2, y + moduleSize * 2, moduleSize * 3, moduleSize * 3)
-  }
-
-  const offset = 12
-  drawFinderPattern(offset, offset)
-  drawFinderPattern(offset + (modules - 7) * moduleSize, offset)
-  drawFinderPattern(offset, offset + (modules - 7) * moduleSize)
-
-  // Data modules (seeded from URL hash for visual consistency)
-  let seed = Math.abs(hash)
-  for (let r = 0; r < modules; r++) {
-    for (let c = 0; c < modules; c++) {
-      // Skip finder pattern areas
-      if ((r < 8 && c < 8) || (r < 8 && c >= modules - 8) || (r >= modules - 8 && c < 8)) continue
-      seed = (seed * 1103515245 + 12345) & 0x7fffffff
-      if (seed % 3 === 0) {
-        ctx.fillStyle = '#1a1a2e'
-        ctx.fillRect(offset + c * moduleSize, offset + r * moduleSize, moduleSize - 1, moduleSize - 1)
-      }
-    }
-  }
-
-  // Center text overlay
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.9)'
-  ctx.fillRect(size / 2 - 50, size / 2 - 10, 100, 20)
+  ctx.fillRect(20, 20, 24, 24)
+  ctx.fillStyle = '#ffffff'
+  ctx.fillRect(24, 24, 16, 16)
   ctx.fillStyle = '#1a1a2e'
-  ctx.font = 'bold 10px -apple-system, sans-serif'
+  ctx.fillRect(28, 28, 8, 8)
+
+  // "Open on mobile" label
+  ctx.fillStyle = '#1a1a2e'
+  ctx.font = 'bold 12px -apple-system, BlinkMacSystemFont, sans-serif'
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
+  ctx.fillText('Open on mobile', size / 2, size / 2 - 16)
+
+  // URL (truncated for display)
+  ctx.font = '10px -apple-system, BlinkMacSystemFont, sans-serif'
+  ctx.fillStyle = '#666666'
   try {
-    const domain = new URL(url).hostname
-    ctx.fillText(domain, size / 2, size / 2)
+    const display = new URL(url).hostname + new URL(url).pathname.slice(0, 20)
+    ctx.fillText(display, size / 2, size / 2 + 8)
   } catch {
-    ctx.fillText('Scan me', size / 2, size / 2)
+    const truncated = url.length > 40 ? url.slice(0, 37) + '...' : url
+    ctx.fillText(truncated, size / 2, size / 2 + 8)
   }
 }
 
