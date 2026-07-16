@@ -6,7 +6,13 @@ Part of the [Attestto](https://attestto.org) identity infrastructure. [Documenta
 
 > Discovery and verification layer for credential wallet browser extensions — like EIP-6963 but for W3C identity wallets.
 
+
+
+
 A website needs to verify a user's identity — KYC status, a university degree, a vLEI credential from GLEIF, a government-issued ID. The user has a credential wallet (browser extension or mobile app) that holds these credentials. This package handles discovery (which wallet does the user have), requests (ask for a Verifiable Presentation with selective disclosure), and verification (validate the cryptographic proof chain).
+
+<img width="1263" height="750" alt="image" src="https://github.com/user-attachments/assets/1bb21f1f-e3c7-4548-b73b-0ecd6128929b" />
+
 
 ## Architecture
 
