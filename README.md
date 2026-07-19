@@ -6,6 +6,8 @@ Part of the [Attestto](https://attestto.org) identity infrastructure. [Documenta
 
 > Discovery and verification layer for credential wallet browser extensions — like EIP-6963 but for W3C identity wallets.
 
+**What's new in v0.5.0** (2026-06-25) — DID-based authentication (`requestAuth`) + `trustedIssuers` filter on sign/auth requests + new "Trust model" section below. Additive, no breaking changes. See [CHANGELOG.md](./CHANGELOG.md).
+
 A website needs to verify a user's identity — KYC status, a university degree, a vLEI credential from GLEIF, a government-issued ID. The user has a credential wallet (browser extension or mobile app) that holds these credentials. This package handles discovery (which wallet does the user have), requests (ask for a Verifiable Presentation with selective disclosure), and verification (validate the cryptographic proof chain).
 
 ## Architecture
@@ -340,6 +342,7 @@ if (result?.approved) {
 | `fileName` | `string` | Human-readable document name (shown in consent popup) |
 | `hashAlgorithm` | `string` | Hash algorithm used (e.g. `'SHA-256'`) |
 | `fileSize` | `number?` | Optional file size in bytes (for display) |
+| `trustedIssuers` | `string[]?` | _(v0.5.0+)_ DIDs of issuers you accept. Wallet filters/highlights matching identities so users don't sign with an identity you'd reject. Omit to accept any identity. |
 
 **Response:**
 
@@ -362,6 +365,52 @@ if (result?.approved) {
 2. Wallet extension shows consent popup
 3. Wallet responds with `credential-wallet:sign-response` + nonce + result
 
+### `requestAuth(wallet, request, options?): Promise<AuthResponse | null>`
+
+_(v0.5.0+)_ DID-based authentication — the "Sign in with Attestto" primitive. The wallet proves control of an identity DID against a site-issued nonce. Mirrors `requestSignature` but with login semantics (`nonce` + `audience` + `origin`) instead of a document hash. Returns `null` if the user rejects or the timeout elapses.
+
+```ts
+import { discoverWallets, requestAuth } from '@attestto/id-wallet-adapter'
+
+const [wallet] = await discoverWallets()
+const result = await requestAuth(wallet, {
+  nonce: crypto.randomUUID(),
+  audience: 'https://your-site.example',
+  origin: window.location.origin,
+  // Optional: declare which issuers you trust. Wallet filters/highlights matching identities.
+  trustedIssuers: ['did:sns:attestto.attestto.sol'],
+})
+
+if (result?.approved) {
+  console.log('Signed in as', result.did)
+  // result.signature, result.publicKeyJwk, result.timestamp also present
+}
+```
+
+**Request:**
+
+| Field | Type | Description |
+|---|---|---|
+| `nonce` | `string` | Server-generated single-use challenge — verify it matches what you issued |
+| `audience` | `string` | Your verifier identifier (typically your URL or DID) — wallet signs over this |
+| `origin` | `string` | Page origin (typically `window.location.origin`) |
+| `trustedIssuers` | `string[]?` | DIDs of issuers you accept. Wallet uses this to filter and highlight matching identities so the user doesn't sign in with an identity you'd reject. Omit to accept any identity. |
+
+**Response:** same shape as `requestSignature` (`approved`, `did`, `signature`, `publicKeyJwk`, `timestamp`).
+
+**Options:**
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `timeoutMs` | `number` | `120000` | How long to wait for the wallet to respond |
+
+**Protocol:** nonce-based CustomEvent pattern:
+1. Site dispatches `credential-wallet:auth` with nonce + request
+2. Wallet shows consent popup (user picks identity if multiple, filtered by `trustedIssuers`)
+3. Wallet responds with `credential-wallet:auth-response` + nonce + result
+
+**Backend verification:** verify the returned signature against the public key in the holder's DID Document. If you set `trustedIssuers`, also verify that an issuer in your list attested the identity.
+
 ### Event Constants
 
 ```ts
@@ -370,6 +419,8 @@ import {
   ANNOUNCE_EVENT,         // 'credential-wallet:announce'
   SIGN_EVENT,             // 'credential-wallet:sign'
   SIGN_RESPONSE_EVENT,    // 'credential-wallet:sign-response'
+  AUTH_EVENT,             // 'credential-wallet:auth'              (v0.5.0+)
+  AUTH_RESPONSE_EVENT,    // 'credential-wallet:auth-response'     (v0.5.0+)
 } from '@attestto/id-wallet-adapter'
 ```
 
@@ -528,6 +579,46 @@ See [SECURITY.md](SECURITY.md) for:
 - **Cross-origin considerations** — CORS for DID resolution and revocation checks
 - **API key exposure** — always use a backend proxy for resolver calls
 - **Trust chain** — the DID method spec defines where to resolve, not the VC
+
+## Trust model (for site developers)
+
+This package implements a **bilateral trust model**. Each side declares what it accepts; neither side is asked to trust the other implicitly.
+
+### Site → wallet: declare which issuers you accept
+
+Pass `trustedIssuers: string[]` on any `requestSignature` or `requestAuth` call:
+
+```ts
+await requestAuth(wallet, {
+  nonce, audience, origin,
+  trustedIssuers: [
+    'did:sns:attestto.attestto.sol',  // any identity issued by Attestto root
+    'did:web:your-tenant.example',    // OR identities issued by your own tenant
+  ],
+})
+```
+
+The wallet uses this to filter and highlight matching identities in the consent popup. If the user has multiple identities, they default-see the one your site will actually accept — no "user signs, server rejects, user retries" loop.
+
+**Empty / omitted** → the wallet shows all the user's identities; you accept whatever they return (verify on the backend).
+
+### Wallet → site: per-origin consent and identity memory
+
+These are wallet-side properties — your site doesn't configure them, but you should know they exist so you understand the UX:
+
+- **First-sight consent** — the first time your origin requests a sign-in or pushes an identity-sync payload, the wallet asks the user to approve your origin. Subsequent requests from the same origin proceed without re-prompting. This means a site that's never been visited cannot silently get an identity signature.
+- **Per-origin identity preference** — when the user picks an identity for your origin, the wallet remembers it. Next time you call `requestAuth`, the wallet default-selects the same identity. The user can override per-call.
+- **User-visible revocation** — the user can revoke your origin's trust (and forget the preference) from the wallet's Settings → Trusted Sites pane.
+
+### Backend verification responsibility
+
+The adapter never trusts a `requestAuth` / `requestSignature` response on its own. Always verify on your backend:
+
+1. The returned `signature` is valid over `nonce + audience + origin` using the `publicKeyJwk` from the response.
+2. The `publicKeyJwk` matches a verification method published in the holder DID's DID Document (resolve via your resolver).
+3. If you set `trustedIssuers`: an issuer in your list actually attested the returned `did` (look for a corresponding VC chain, OR trust the wallet's filtering and skip — depending on your assurance level).
+
+The `nonce` must be single-use and bound to the user's session. Replay protection is the verifier's job, not the wallet's.
 
 ## Build with an LLM
 

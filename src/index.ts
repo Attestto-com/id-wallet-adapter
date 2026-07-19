@@ -2,6 +2,7 @@ export { discoverWallets } from './discover'
 export { registerWallet } from './register'
 export { pickWallet } from './pick'
 export { requestSignature } from './sign'
+export { requestAuth } from './auth'
 export { verifyPresentation } from './verify'
 export {
   serializeCredentialOffer,
@@ -15,7 +16,14 @@ export type {
   CredentialOfferParseError,
   CredentialOfferParseErrorCode,
 } from './credential-offer'
-export { DISCOVER_EVENT, ANNOUNCE_EVENT, SIGN_EVENT, SIGN_RESPONSE_EVENT } from './constants'
+export {
+  DISCOVER_EVENT,
+  ANNOUNCE_EVENT,
+  SIGN_EVENT,
+  SIGN_RESPONSE_EVENT,
+  AUTH_EVENT,
+  AUTH_RESPONSE_EVENT,
+} from './constants'
 export type {
   WalletAnnouncement,
   WalletProtocol,
@@ -26,6 +34,10 @@ export type {
   SignResponse,
   SignDetail,
   SignResponseDetail,
+  AuthRequest,
+  AuthResponse,
+  AuthDetail,
+  AuthResponseDetail,
 } from './types'
 export type {
   PickWalletOptions,
@@ -41,3 +53,6 @@ export type {
 export type {
   RequestSignatureOptions,
 } from './sign'
+export type {
+  RequestAuthOptions,
+} from './auth'
