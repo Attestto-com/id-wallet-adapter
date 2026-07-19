@@ -9,3 +9,9 @@ export const SIGN_EVENT = 'credential-wallet:sign'
 
 /** Dispatched by the wallet extension with the signature result */
 export const SIGN_RESPONSE_EVENT = 'credential-wallet:sign-response'
+
+/** Dispatched by the site to request DID-based authentication (login) */
+export const AUTH_EVENT = 'credential-wallet:auth'
+
+/** Dispatched by the wallet extension with the authentication result */
+export const AUTH_RESPONSE_EVENT = 'credential-wallet:auth-response'

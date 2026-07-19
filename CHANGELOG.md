@@ -4,6 +4,16 @@ All notable changes to `@attestto/id-wallet-adapter` will be documented in this 
 
 This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-06-25
+
+### Added
+- **DID-based authentication flow** — new `requestAuth(wallet, request)` for login use cases. Mirrors `requestSignature` but with `{ nonce, audience, origin }` semantics instead of document hash. Exports: `requestAuth`, `RequestAuthOptions`, `AuthRequest`, `AuthResponse`, `AuthDetail`, `AuthResponseDetail`, `AUTH_EVENT`, `AUTH_RESPONSE_EVENT`.
+- **`trustedIssuers?: string[]` field** on `SignRequest` and `AuthRequest`. The verifier declares which issuer DIDs it will accept; the wallet uses this to filter and highlight the user's matching identities so the user doesn't sign with an identity the verifier would reject. Empty/omitted = wallet shows all identities.
+- 7 new tests covering the auth round-trip, timeout, envelope-nonce isolation, and `trustedIssuers` protocol passthrough on both request types (now 103 tests total).
+
+### Notes
+- Additive only — no breaking changes. Wallet implementations that ignore `trustedIssuers` continue to work; sites that don't set it get the previous behavior (wallet shows all identities).
+
 ## [0.4.1] - 2026-04-15
 
 ### Added

@@ -14,11 +14,14 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { discoverWallets } from './discover'
 import { registerWallet } from './register'
 import { requestSignature } from './sign'
+import { requestAuth } from './auth'
 import {
   DISCOVER_EVENT,
   ANNOUNCE_EVENT,
   SIGN_EVENT,
   SIGN_RESPONSE_EVENT,
+  AUTH_EVENT,
+  AUTH_RESPONSE_EVENT,
 } from './constants'
 import type {
   WalletAnnouncement,
@@ -26,6 +29,9 @@ import type {
   SignDetail,
   SignResponse,
   SignResponseDetail,
+  AuthDetail,
+  AuthResponse,
+  AuthResponseDetail,
 } from './types'
 
 // ---------------------------------------------------------------------------
@@ -589,5 +595,173 @@ describe('register + discover integration', () => {
     const dids = wallets.map((w) => w.did)
     expect(dids).toContain(walletC.did)
     expect(dids).toContain(walletD.did)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// SignRequest.trustedIssuers — protocol round-trip
+// ---------------------------------------------------------------------------
+
+describe('SignRequest.trustedIssuers', () => {
+  it('passes trustedIssuers through to the wallet via SIGN_EVENT detail', () => {
+    let captured: SignDetail | null = null
+    const handler = (e: Event) => {
+      captured = (e as CustomEvent<SignDetail>).detail
+      window.dispatchEvent(
+        new CustomEvent<SignResponseDetail>(SIGN_RESPONSE_EVENT, {
+          detail: { nonce: captured!.nonce, response: { approved: false } },
+        }),
+      )
+    }
+    window.addEventListener(SIGN_EVENT, handler)
+
+    void requestSignature(makeWallet(), {
+      hash: 'abc',
+      fileName: 'doc.pdf',
+      hashAlgorithm: 'SHA-256',
+      trustedIssuers: ['did:sns:attestto.attestto.sol', 'did:web:bccr.fi.cr'],
+    })
+
+    expect(captured).not.toBeNull()
+    expect(captured!.request.trustedIssuers).toEqual([
+      'did:sns:attestto.attestto.sol',
+      'did:web:bccr.fi.cr',
+    ])
+
+    window.removeEventListener(SIGN_EVENT, handler)
+  })
+
+  it('omits trustedIssuers when not provided (site accepts any issuer)', () => {
+    let captured: SignDetail | null = null
+    const handler = (e: Event) => {
+      captured = (e as CustomEvent<SignDetail>).detail
+      window.dispatchEvent(
+        new CustomEvent<SignResponseDetail>(SIGN_RESPONSE_EVENT, {
+          detail: { nonce: captured!.nonce, response: { approved: false } },
+        }),
+      )
+    }
+    window.addEventListener(SIGN_EVENT, handler)
+
+    void requestSignature(makeWallet(), {
+      hash: 'abc',
+      fileName: 'doc.pdf',
+      hashAlgorithm: 'SHA-256',
+    })
+
+    expect(captured).not.toBeNull()
+    expect(captured!.request.trustedIssuers).toBeUndefined()
+
+    window.removeEventListener(SIGN_EVENT, handler)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// requestAuth
+// ---------------------------------------------------------------------------
+
+const AUTH_REQUEST = {
+  nonce: 'verifier-nonce-abc123',
+  audience: 'https://verifier.example',
+  origin: 'https://verifier.example',
+}
+
+function installAuthResponder(response: AuthResponse): () => void {
+  const handler = (e: Event) => {
+    const detail = (e as CustomEvent<AuthDetail>).detail
+    window.dispatchEvent(
+      new CustomEvent<AuthResponseDetail>(AUTH_RESPONSE_EVENT, {
+        detail: { nonce: detail.nonce, response },
+      }),
+    )
+  }
+  window.addEventListener(AUTH_EVENT, handler)
+  return () => window.removeEventListener(AUTH_EVENT, handler)
+}
+
+describe('requestAuth', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('resolves with AuthResponse when wallet approves', async () => {
+    const approvedResponse: AuthResponse = {
+      approved: true,
+      did: 'did:sns:chongkan.attestto.sol',
+      signature: 'base64url-signature-value',
+      publicKeyJwk: { kty: 'EC', crv: 'P-256', x: 'xv', y: 'yv' },
+      timestamp: '2026-06-25T00:00:00Z',
+    }
+    const cleanup = installAuthResponder(approvedResponse)
+    const promise = requestAuth(makeWallet(), AUTH_REQUEST, { timeoutMs: 5000 })
+    const result = await promise
+    expect(result).toEqual(approvedResponse)
+    expect(result!.approved).toBe(true)
+    expect(result!.did).toBe('did:sns:chongkan.attestto.sol')
+    cleanup()
+  })
+
+  it('resolves with rejected response when wallet denies', async () => {
+    const rejectedResponse: AuthResponse = { approved: false }
+    const cleanup = installAuthResponder(rejectedResponse)
+    const promise = requestAuth(makeWallet(), AUTH_REQUEST, { timeoutMs: 5000 })
+    const result = await promise
+    expect(result!.approved).toBe(false)
+    expect(result!.did).toBeUndefined()
+    cleanup()
+  })
+
+  it('times out and resolves null', async () => {
+    const promise = requestAuth(makeWallet(), AUTH_REQUEST, { timeoutMs: 500 })
+    vi.advanceTimersByTime(500)
+    const result = await promise
+    expect(result).toBeNull()
+  })
+
+  it('passes trustedIssuers through to the wallet via AUTH_EVENT detail', () => {
+    let captured: AuthDetail | null = null
+    const handler = (e: Event) => {
+      captured = (e as CustomEvent<AuthDetail>).detail
+      window.dispatchEvent(
+        new CustomEvent<AuthResponseDetail>(AUTH_RESPONSE_EVENT, {
+          detail: { nonce: captured!.nonce, response: { approved: false } },
+        }),
+      )
+    }
+    window.addEventListener(AUTH_EVENT, handler)
+
+    void requestAuth(makeWallet(), {
+      ...AUTH_REQUEST,
+      trustedIssuers: ['did:sns:attestto.attestto.sol'],
+    })
+
+    expect(captured).not.toBeNull()
+    expect(captured!.request.trustedIssuers).toEqual([
+      'did:sns:attestto.attestto.sol',
+    ])
+
+    window.removeEventListener(AUTH_EVENT, handler)
+  })
+
+  it('ignores auth-response events with mismatched envelope nonce', async () => {
+    const cleanup = installAuthResponder({ approved: true, did: 'did:web:wrong' })
+    // Also dispatch a stale response from a previous auth flow (different envelope nonce)
+    setTimeout(() => {
+      window.dispatchEvent(
+        new CustomEvent<AuthResponseDetail>(AUTH_RESPONSE_EVENT, {
+          detail: { nonce: 'stale-nonce', response: { approved: true, did: 'did:web:phisher' } },
+        }),
+      )
+    }, 100)
+
+    const promise = requestAuth(makeWallet(), AUTH_REQUEST, { timeoutMs: 5000 })
+    vi.advanceTimersByTime(100)
+    const result = await promise
+    expect(result!.did).toBe('did:web:wrong')  // Real responder, not stale
+    cleanup()
   })
 })

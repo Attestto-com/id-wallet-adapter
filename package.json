@@ -1,6 +1,6 @@
 {
   "name": "@attestto/id-wallet-adapter",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "Universal wallet adapter for credential wallet extensions — discovery, VP exchange, and cryptographic verification",
   "homepage": "https://attestto.org",
   "type": "module",
@@ -41,7 +41,7 @@
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Attestto-com/id-wallet-adapter.git"
+    "url": "git+https://github.com/Attestto-com/id-wallet-adapter.git"
   },
   "author": "Eduardo Chongkan <eduardo@attestto.com>",
   "contributors": [
