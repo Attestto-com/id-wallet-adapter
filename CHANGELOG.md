@@ -4,6 +4,20 @@ All notable changes to `@attestto/id-wallet-adapter` will be documented in this 
 
 This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-07-19
+
+### Security
+- **`verifyPresentation` now enforces challenge/domain binding and freshness (SOC-23).** Verifiers must pass the `expectedChallenge` and `expectedDomain` they issued at request time; a presentation whose authentication proof was not made over both — for example one captured on another origin or replayed from a prior session — is rejected. The binding gate runs **before any network call**, so a foreign or replayed VP is never resolved, verified, or fetched on the user's behalf. New error codes: `PROOF_MISSING`, `CHALLENGE_MISMATCH`, `DOMAIN_MISMATCH`, `PROOF_EXPIRED`, `EXPECTED_BINDING_MISSING`.
+- **Fail closed throughout.** A single proof must bind BOTH the challenge and domain, each as a **non-empty** string (a blank/spliced proof field cannot satisfy the gate). Blank `expectedChallenge`/`expectedDomain` from the caller are rejected outright (`EXPECTED_BINDING_MISSING`).
+- **Freshness is mandatory.** The bound proof must carry a parseable `created` timestamp within `maxProofAgeSeconds` (default 300s, 60s future-skew tolerance). A proof that omits `created` — or carries an unparseable one — is rejected rather than skipped, so freshness enforcement cannot be bypassed.
+- **Signature is bound to the challenge/domain.** `expectedChallenge`/`expectedDomain` are forwarded to the resolver's `POST /1.0/verify`, so the trust anchor ties the cryptographic check to the bound values rather than trusting local metadata matching alone.
+
+### Changed (BREAKING)
+- `VerifyOptions` gains **required** `expectedChallenge: string` and `expectedDomain: string`, plus optional `maxProofAgeSeconds?: number`. Existing callers must supply the challenge/domain they generated for the request. Passing a resolver `{valid:true}` is no longer sufficient on its own.
+
+### Added
+- 11 tests covering cross-origin replay, session replay, missing/spliced/blank proof, empty caller binding, missing and unparseable freshness timestamps, resolver binding passthrough, same-proof binding, and the legitimate happy path (114 total).
+
 ## [0.5.0] - 2026-06-25
 
 ### Added

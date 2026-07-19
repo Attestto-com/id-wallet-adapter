@@ -7,10 +7,32 @@ import type { WalletAnnouncement } from './types'
 export interface VerifyOptions {
   resolverUrl: string
   trustedIssuers: string[]
+  /**
+   * The challenge the verifier generated for THIS request (e.g. the value passed
+   * as `challenge` to the CHAPI `navigator.credentials.get` call). Required: a VP
+   * whose authentication proof was not made over this exact challenge is rejected.
+   * This is the primary replay defense — do not omit it.
+   */
+  expectedChallenge: string
+  /**
+   * The verifier's own origin/audience (e.g. `window.location.origin`). Required:
+   * a VP bound to a different domain is rejected, blocking cross-origin replay of a
+   * presentation captured or minted for another site.
+   */
+  expectedDomain: string
+  /**
+   * Maximum age, in seconds, for the bound proof's `created` timestamp when present.
+   * A proof older than this (or dated in the future beyond clock skew) is rejected.
+   * Defaults to 300s. Set higher only with a documented reason.
+   */
+  maxProofAgeSeconds?: number
   checkRevocation?: boolean
   trustedWallets?: string[]
   signal?: AbortSignal
 }
+
+/** Tolerance, in seconds, for a proof `created` timestamp dated in the future (clock skew). */
+const FUTURE_SKEW_TOLERANCE_SECONDS = 60
 
 export interface VerifyResult {
   valid: boolean
@@ -31,6 +53,11 @@ export type VerifyErrorCode =
   | 'ISSUER_UNTRUSTED'
   | 'CREDENTIAL_REVOKED'
   | 'WALLET_UNTRUSTED'
+  | 'PROOF_MISSING'
+  | 'CHALLENGE_MISMATCH'
+  | 'DOMAIN_MISMATCH'
+  | 'PROOF_EXPIRED'
+  | 'EXPECTED_BINDING_MISSING'
 
 export async function verifyPresentation(
   vp: Record<string, unknown>,
@@ -40,6 +67,15 @@ export async function verifyPresentation(
   const errors: VerifyError[] = []
   let holderDid: string | null = null
   let didDocument: Record<string, unknown> | null = null
+
+  // Replay / audience binding is the first gate. A VP whose authentication proof
+  // was not made over the verifier's own challenge AND domain is rejected here,
+  // BEFORE any network call — we never resolve, verify, or fetch anything on
+  // behalf of a presentation that could have been captured or minted elsewhere.
+  const bindingErrors = validateBinding(vp, options)
+  if (bindingErrors.length > 0) {
+    return { valid: false, holderDid: extractHolder(vp), errors: bindingErrors, didDocument: null }
+  }
 
   if (options.trustedWallets) {
     if (!wallet) {
@@ -66,7 +102,7 @@ export async function verifyPresentation(
     return { valid: false, holderDid, errors, didDocument: null }
   }
 
-  const sigValid = await verifySignature(vp, options.resolverUrl, options.signal)
+  const sigValid = await verifySignature(vp, options)
   if (!sigValid) {
     errors.push({ code: 'SIGNATURE_INVALID', message: 'VP signature invalid' })
   }
@@ -99,6 +135,97 @@ function extractHolder(vp: Record<string, unknown>): string | null {
   return null
 }
 
+function isNonEmptyString(v: unknown): v is string {
+  return typeof v === 'string' && v.trim().length > 0
+}
+
+/** A VP may carry a single proof object or an array of proofs. Normalize to an array. */
+function extractProofs(vp: Record<string, unknown>): Record<string, unknown>[] {
+  const p = vp.proof
+  if (Array.isArray(p)) return p.filter((x) => typeof x === 'object' && x !== null) as Record<string, unknown>[]
+  if (typeof p === 'object' && p !== null) return [p as Record<string, unknown>]
+  return []
+}
+
+/**
+ * Enforce that the presentation is bound to THIS verifier's challenge and domain,
+ * and is fresh. Returns the list of binding errors (empty when the VP is bound).
+ *
+ * A single proof must carry BOTH the expected challenge and the expected domain —
+ * matching each field on separate proofs does not count, since an attacker could
+ * otherwise splice a foreign-domain auth proof next to a matching-domain one.
+ */
+function validateBinding(vp: Record<string, unknown>, options: VerifyOptions): VerifyError[] {
+  // Fail closed on caller misconfiguration. A blank expected challenge or domain
+  // must never authenticate anything — it would otherwise match a proof that also
+  // left the field blank, turning the binding gate into a no-op.
+  if (!isNonEmptyString(options.expectedChallenge) || !isNonEmptyString(options.expectedDomain)) {
+    return [
+      {
+        code: 'EXPECTED_BINDING_MISSING',
+        message: 'expectedChallenge and expectedDomain are required and must be non-empty',
+      },
+    ]
+  }
+
+  const proofs = extractProofs(vp)
+  if (proofs.length === 0) {
+    return [{ code: 'PROOF_MISSING', message: 'VP has no proof to bind challenge/domain against' }]
+  }
+
+  // A single proof must carry BOTH the expected challenge and domain, each as a
+  // non-empty string. Matching each field on separate proofs — or matching a
+  // blank field — does not count: an attacker could otherwise splice a
+  // foreign-domain auth proof next to a matching-domain one, or bind against ''.
+  const bound = proofs.find(
+    (pr) =>
+      isNonEmptyString(pr.challenge) &&
+      isNonEmptyString(pr.domain) &&
+      pr.challenge === options.expectedChallenge &&
+      pr.domain === options.expectedDomain,
+  )
+  if (!bound) {
+    const errors: VerifyError[] = []
+    const challengeSomewhere = proofs.some((pr) => pr.challenge === options.expectedChallenge)
+    const domainSomewhere = proofs.some((pr) => pr.domain === options.expectedDomain)
+    if (!challengeSomewhere) {
+      errors.push({ code: 'CHALLENGE_MISMATCH', message: 'No VP proof matches the expected challenge (replay)' })
+    }
+    if (!domainSomewhere) {
+      errors.push({ code: 'DOMAIN_MISMATCH', message: 'No VP proof matches the expected domain (cross-origin replay)' })
+    }
+    if (errors.length === 0) {
+      // Both fields appear, but not bound together on one non-empty proof.
+      errors.push({
+        code: 'CHALLENGE_MISMATCH',
+        message: 'No single VP proof binds both the expected challenge and domain',
+      })
+    }
+    return errors
+  }
+
+  // Freshness is mandatory and fail-closed. The bound proof MUST carry a parseable
+  // `created` timestamp inside the window. A proof with no timestamp (or an
+  // unparseable one) cannot be shown to be fresh — omitting `created` must not be
+  // a way to skip replay-window enforcement, so it is rejected.
+  const created = bound.created
+  if (typeof created !== 'string' || Number.isNaN(Date.parse(created))) {
+    return [
+      { code: 'PROOF_EXPIRED', message: 'VP proof has no valid `created` timestamp; freshness cannot be established' },
+    ]
+  }
+  const maxAge = options.maxProofAgeSeconds ?? 300
+  const ageSeconds = (Date.now() - Date.parse(created)) / 1000
+  if (ageSeconds > maxAge) {
+    return [{ code: 'PROOF_EXPIRED', message: `VP proof is older than ${maxAge}s (replay)` }]
+  }
+  if (ageSeconds < -FUTURE_SKEW_TOLERANCE_SECONDS) {
+    return [{ code: 'PROOF_EXPIRED', message: 'VP proof `created` timestamp is in the future' }]
+  }
+
+  return []
+}
+
 function extractCredentials(vp: Record<string, unknown>): Record<string, unknown>[] {
   const c = vp.verifiableCredential
   if (Array.isArray(c)) return c as Record<string, unknown>[]
@@ -123,13 +250,22 @@ async function resolveDid(did: string, resolverUrl: string, signal?: AbortSignal
   return data.didDocument ?? null
 }
 
-async function verifySignature(vp: Record<string, unknown>, resolverUrl: string, signal?: AbortSignal): Promise<boolean> {
+async function verifySignature(vp: Record<string, unknown>, options: VerifyOptions): Promise<boolean> {
   try {
-    const res = await fetch(`${resolverUrl}/1.0/verify`, {
+    // Forward the expected challenge/domain so the resolver binds the signature
+    // check to them: the proof must be cryptographically valid AND made over the
+    // verifier's challenge/domain. Local metadata matching (validateBinding) alone
+    // could be satisfied by an unsigned proof spliced into the `proof` array; the
+    // resolver is the trust anchor that ties the signature to the bound values.
+    const res = await fetch(`${options.resolverUrl}/1.0/verify`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ verifiablePresentation: vp }),
-      signal,
+      body: JSON.stringify({
+        verifiablePresentation: vp,
+        expectedChallenge: options.expectedChallenge,
+        expectedDomain: options.expectedDomain,
+      }),
+      signal: options.signal,
     })
     if (!res.ok) return false
     const data = await res.json() as { valid?: boolean }
