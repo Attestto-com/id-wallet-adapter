@@ -24,6 +24,46 @@ function bytesToB64url(buf: ArrayBuffer): string {
   return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 }
 
+function b64urlToBytes(s: string): Uint8Array {
+  const b64 = s.replace(/-/g, '+').replace(/_/g, '/')
+  const pad = b64.length % 4 === 0 ? '' : '='.repeat(4 - (b64.length % 4))
+  const bin = atob(b64 + pad)
+  const out = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i)
+  return out
+}
+
+const B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
+function base58btcEncode(bytes: Uint8Array): string {
+  const digits = [0]
+  for (const b of bytes) {
+    let carry = b
+    for (let j = 0; j < digits.length; j++) {
+      carry += digits[j] << 8
+      digits[j] = carry % 58
+      carry = (carry / 58) | 0
+    }
+    while (carry > 0) {
+      digits.push(carry % 58)
+      carry = (carry / 58) | 0
+    }
+  }
+  let out = ''
+  for (let k = 0; k < bytes.length && bytes[k] === 0; k++) out += '1'
+  for (let i = digits.length - 1; i >= 0; i--) out += B58[digits[i]]
+  return out
+}
+
+/** `publicKeyMultibase` (did-core form) for an Ed25519 JWK: z + base58btc(0xed01 || raw32). */
+function ed25519Multibase(jwk: JsonWebKey): string {
+  const raw = b64urlToBytes(jwk.x as string)
+  const prefixed = new Uint8Array(2 + raw.length)
+  prefixed[0] = 0xed
+  prefixed[1] = 0x01
+  prefixed.set(raw, 2)
+  return 'z' + base58btcEncode(prefixed)
+}
+
 /** Build a signed, verifiable AuthResponse + a DID Document that lists the key under `authentication`. */
 async function makeSignedResponse(overrides: {
   did?: string
@@ -134,7 +174,9 @@ describe('verifyAuth (SOC-28)', () => {
 
     expect(result.authenticated).toBe(false)
     const codes = result.errors.map((e) => e.code)
-    expect(codes.some((c) => c === 'AUDIENCE_MISMATCH' || c === 'ORIGIN_MISMATCH')).toBe(true)
+    // Both checks must fire — signed over a different audience AND origin.
+    expect(codes).toContain('AUDIENCE_MISMATCH')
+    expect(codes).toContain('ORIGIN_MISMATCH')
   })
 
   it('rejects a stale response beyond the freshness window', async () => {
@@ -167,5 +209,75 @@ describe('verifyAuth (SOC-28)', () => {
 
     expect(result.authenticated).toBe(false)
     expect(result.errors.map((e) => e.code)).toContain('EXPECTED_PARAMS_MISSING')
+  })
+
+  it('authenticates when the DID Document lists the key as publicKeyMultibase (H2)', async () => {
+    const { response } = await makeSignedResponse()
+    // Same key, expressed as Ed25519VerificationKey2020 / Multikey (publicKeyMultibase).
+    const multibase = ed25519Multibase(response.publicKeyJwk as JsonWebKey)
+    stubResolver({
+      id: DID,
+      verificationMethod: [{ id: `${DID}#k1`, type: 'Ed25519VerificationKey2020', controller: DID, publicKeyMultibase: multibase }],
+      authentication: [`${DID}#k1`],
+    })
+
+    const result = await verifyAuth(response, options())
+
+    expect(result.errors).toEqual([])
+    expect(result.authenticated).toBe(true)
+  })
+
+  it('rejects a response whose fields contain an injected newline (H1)', async () => {
+    const fetchSpy = vi.fn()
+    vi.stubGlobal('fetch', fetchSpy)
+    // Both expected and echoed nonce carry the newline so binding would "match" —
+    // the canonical-safety guard must reject before that.
+    const injected = 'abc\nhttps://attacker.example'
+    const { response } = await makeSignedResponse({ nonce: injected })
+
+    const result = await verifyAuth(response, options({ expectedNonce: injected }))
+
+    expect(result.authenticated).toBe(false)
+    expect(result.errors.map((e) => e.code)).toContain('MALFORMED_FIELDS')
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it('rejects a DER-encoded / wrong-length signature with a clear error (H3)', async () => {
+    const { response, didDocument } = await makeSignedResponse()
+    stubResolver(didDocument)
+    // A 70-byte DER-looking blob (leading 0x30) instead of a 64-byte raw signature.
+    const der = new Uint8Array(70)
+    der[0] = 0x30
+    const bad = { ...response, signature: bytesToB64url(der.buffer) }
+
+    const result = await verifyAuth(bad, options())
+
+    expect(result.authenticated).toBe(false)
+    expect(result.errors.map((e) => e.code)).toContain('SIGNATURE_FORMAT_INVALID')
+  })
+
+  it('does not verify signatures or resolve the DID when binding fails (H4)', async () => {
+    const fetchSpy = vi.fn()
+    vi.stubGlobal('fetch', fetchSpy)
+    const { response } = await makeSignedResponse({ nonce: 'wrong-nonce' })
+
+    const result = await verifyAuth(response, options({ expectedNonce: NONCE }))
+
+    expect(result.authenticated).toBe(false)
+    expect(result.errors.map((e) => e.code)).toContain('NONCE_MISMATCH')
+    expect(fetchSpy).not.toHaveBeenCalled() // no resolver round-trip for a mismatched response
+  })
+
+  it('rejects a replayed nonce via the isNonceUsed hook, accepts a fresh one (C1)', async () => {
+    const { response, didDocument } = await makeSignedResponse()
+    stubResolver(didDocument)
+
+    const replayed = await verifyAuth(response, options({ isNonceUsed: () => true }))
+    expect(replayed.authenticated).toBe(false)
+    expect(replayed.errors.map((e) => e.code)).toContain('NONCE_REPLAYED')
+
+    stubResolver(didDocument)
+    const fresh = await verifyAuth(response, options({ isNonceUsed: () => false }))
+    expect(fresh.authenticated).toBe(true)
   })
 })

@@ -251,4 +251,30 @@ describe('verifyPresentation — challenge/domain binding (SOC-23)', () => {
     expect(result.valid).toBe(true)
     expect(result.holderDid).toBe(wallet.did)
   })
+
+  it('rejects an otherwise-valid VP when the isChallengeUsed hook reports replay (SOC-23/C1)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.includes('/1.0/identifiers/')) {
+          return { ok: true, json: async () => ({ didDocument: { id: wallet.did } }) } as Response
+        }
+        if (url.includes('/1.0/verify')) {
+          return { ok: true, json: async () => ({ valid: true }) } as Response
+        }
+        return { ok: false, json: async () => ({}) } as Response
+      }),
+    )
+
+    const vp = vpWithProof({
+      type: 'Ed25519Signature2020',
+      challenge: CHALLENGE,
+      domain: DOMAIN,
+      created: new Date().toISOString(),
+    })
+
+    const seen = await verifyPresentation(vp, wallet, baseOptions({ isChallengeUsed: () => true }))
+    expect(seen.valid).toBe(false)
+    expect(seen.errors.map((e) => e.code)).toContain('CHALLENGE_REPLAYED')
+  })
 })
