@@ -1,6 +1,6 @@
 {
   "name": "@attestto/id-wallet-adapter",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Universal wallet adapter for credential wallet extensions — discovery, VP exchange, and cryptographic verification",
   "homepage": "https://attestto.org",
   "type": "module",

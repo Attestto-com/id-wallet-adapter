@@ -4,6 +4,7 @@ export { pickWallet } from './pick'
 export { requestSignature } from './sign'
 export { requestAuth } from './auth'
 export { verifyPresentation } from './verify'
+export { verifyAuth, canonicalAuthMessage, DID_AUTH_CANONICAL_VERSION } from './auth-verify'
 export {
   serializeCredentialOffer,
   parseCredentialOffer,
@@ -36,6 +37,7 @@ export type {
   SignResponseDetail,
   AuthRequest,
   AuthResponse,
+  UnverifiedAuthResponse,
   AuthDetail,
   AuthResponseDetail,
 } from './types'
@@ -50,6 +52,12 @@ export type {
   VerifyError,
   VerifyErrorCode,
 } from './verify'
+export type {
+  VerifyAuthOptions,
+  AuthVerifyResult,
+  AuthVerifyError,
+  AuthVerifyErrorCode,
+} from './auth-verify'
 export type {
   RequestSignatureOptions,
 } from './sign'

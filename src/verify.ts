@@ -26,6 +26,15 @@ export interface VerifyOptions {
    * Defaults to 300s. Set higher only with a documented reason.
    */
   maxProofAgeSeconds?: number
+  /**
+   * Single-use enforcement. Binding + freshness stop cross-origin and stale replays,
+   * but not re-submission of a captured VP within the freshness window. Provide this
+   * hook to consult your own seen-challenge store: return `true` if `challenge` was
+   * already accepted. When true the VP is rejected (`CHALLENGE_REPLAYED`). Mark the
+   * challenge used only after a successful verification. Without this hook, the relying
+   * party is responsible for never verifying the same issued challenge twice.
+   */
+  isChallengeUsed?: (challenge: string) => boolean | Promise<boolean>
   checkRevocation?: boolean
   trustedWallets?: string[]
   signal?: AbortSignal
@@ -58,6 +67,7 @@ export type VerifyErrorCode =
   | 'DOMAIN_MISMATCH'
   | 'PROOF_EXPIRED'
   | 'EXPECTED_BINDING_MISSING'
+  | 'CHALLENGE_REPLAYED'
 
 export async function verifyPresentation(
   vp: Record<string, unknown>,
@@ -120,6 +130,12 @@ export async function verifyPresentation(
         errors.push({ code: 'CREDENTIAL_REVOKED', message: 'Credential revoked' })
       }
     }
+  }
+
+  // Single-use: only after the VP is otherwise valid, consult the caller's seen-challenge
+  // store (if provided) so a captured-but-fresh VP cannot be replayed within the window.
+  if (errors.length === 0 && options.isChallengeUsed && (await options.isChallengeUsed(options.expectedChallenge))) {
+    errors.push({ code: 'CHALLENGE_REPLAYED', message: 'Challenge has already been used (replay)' })
   }
 
   return { valid: errors.length === 0, holderDid, errors, didDocument }
@@ -243,7 +259,7 @@ function extractIssuer(vc: Record<string, unknown>): string | null {
   return null
 }
 
-async function resolveDid(did: string, resolverUrl: string, signal?: AbortSignal): Promise<Record<string, unknown> | null> {
+export async function resolveDid(did: string, resolverUrl: string, signal?: AbortSignal): Promise<Record<string, unknown> | null> {
   const res = await fetch(`${resolverUrl}/1.0/identifiers/${encodeURIComponent(did)}`, { signal })
   if (!res.ok) return null
   const data = await res.json() as { didDocument?: Record<string, unknown> }
@@ -257,6 +273,12 @@ async function verifySignature(vp: Record<string, unknown>, options: VerifyOptio
     // verifier's challenge/domain. Local metadata matching (validateBinding) alone
     // could be satisfied by an unsigned proof spliced into the `proof` array; the
     // resolver is the trust anchor that ties the signature to the bound values.
+    //
+    // RESOLVER CONTRACT: the resolver at {resolverUrl}/1.0/verify MUST cryptographically
+    // verify the presentation proof AND confirm it was made over `expectedChallenge`
+    // and `expectedDomain`. If the resolver ignores these fields, binding enforcement
+    // degrades to local metadata matching only. Point resolverUrl at a resolver you
+    // control or trust to honor this contract.
     const res = await fetch(`${options.resolverUrl}/1.0/verify`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
