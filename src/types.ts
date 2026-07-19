@@ -135,19 +135,42 @@ export interface AuthRequest {
   trustedIssuers?: string[]
 }
 
-/** What the wallet returns after the user authenticates */
+/**
+ * What the wallet returns after the user authenticates.
+ *
+ * IMPORTANT: this is UNVERIFIED. It arrives over a page `window` event that any
+ * script can forge, so `approved`/`did` are NOT an authentication result. A relying
+ * party MUST pass this to `verifyAuth` and trust only `authenticated === true`.
+ *
+ * When approved, the wallet echoes the `nonce`/`audience`/`origin` it signed (so the
+ * verifier can detect a binding mismatch precisely) and signs the canonical payload
+ * defined by `canonicalAuthMessage` (see auth-verify.ts): the version tag, did, nonce,
+ * audience, origin and timestamp, LF-joined.
+ */
 export interface AuthResponse {
-  /** Whether the user approved the auth request */
+  /** Whether the user approved the auth request. NOT proof of authentication on its own. */
   approved: boolean
   /** The authenticated DID (present when approved) */
   did?: string
-  /** Base64url-encoded signature over canonical payload (present when approved) */
+  /** The nonce the wallet signed — echoed back so the verifier can compare (present when approved) */
+  nonce?: string
+  /** The audience the wallet signed — echoed back (present when approved) */
+  audience?: string
+  /** The origin the wallet signed — echoed back (present when approved) */
+  origin?: string
+  /** Base64url-encoded signature over the canonical payload (present when approved) */
   signature?: string
   /** Signer's public key in JWK format (present when approved) */
   publicKeyJwk?: JsonWebKey
   /** ISO 8601 timestamp the signature was created (present when approved) */
   timestamp?: string
 }
+
+/**
+ * Alias emphasizing that `requestAuth`'s result is unverified until `verifyAuth`
+ * confirms it. Prefer this name at call sites that hold a raw `requestAuth` result.
+ */
+export type UnverifiedAuthResponse = AuthResponse
 
 /** Payload of the auth event (site → wallet) */
 export interface AuthDetail {

@@ -15,7 +15,7 @@ import { AUTH_EVENT, AUTH_RESPONSE_EVENT } from './constants'
 import type {
   WalletAnnouncement,
   AuthRequest,
-  AuthResponse,
+  UnverifiedAuthResponse,
   AuthDetail,
   AuthResponseDetail,
 } from './types'
@@ -31,22 +31,30 @@ export interface RequestAuthOptions {
  * @param wallet   The wallet to authenticate with (from discoverWallets or pickWallet)
  * @param request  The auth challenge (nonce, audience, origin, optional trustedIssuers)
  * @param options  Optional timeout configuration
- * @returns AuthResponse if approved, null if rejected or timed out
+ * @returns An **unverified** response if approved, null if rejected or timed out.
+ *
+ * SECURITY: the result arrives over a page `window` event that any script can
+ * forge, so `approved`/`did` are NOT proof of authentication. You MUST pass the
+ * result to `verifyAuth` and trust only `authenticated === true`.
  *
  * @example
  * ```ts
- * import { discoverWallets, requestAuth } from '@attestto/id-wallet-adapter'
+ * import { discoverWallets, requestAuth, verifyAuth } from '@attestto/id-wallet-adapter'
  *
  * const [wallet] = await discoverWallets()
- * const result = await requestAuth(wallet, {
- *   nonce: crypto.randomUUID(),
- *   audience: 'https://verifier.example',
- *   origin: window.location.origin,
- *   trustedIssuers: ['did:sns:attestto.attestto.sol'],
- * })
+ * const nonce = crypto.randomUUID()
+ * const audience = window.location.origin
+ * const origin = window.location.origin
+ * const result = await requestAuth(wallet, { nonce, audience, origin })
  *
- * if (result?.approved) {
- *   console.log('Authenticated as', result.did)
+ * if (result) {
+ *   const verified = await verifyAuth(result, {
+ *     expectedNonce: nonce,
+ *     expectedAudience: audience,
+ *     expectedOrigin: origin,
+ *     resolverUrl: 'https://resolver.example',
+ *   })
+ *   if (verified.authenticated) console.log('Authenticated as', verified.did)
  * }
  * ```
  */
@@ -54,7 +62,7 @@ export function requestAuth(
   wallet: WalletAnnouncement,
   request: AuthRequest,
   options: RequestAuthOptions = {},
-): Promise<AuthResponse | null> {
+): Promise<UnverifiedAuthResponse | null> {
   const { timeoutMs = 120_000 } = options
 
   return new Promise((resolve) => {

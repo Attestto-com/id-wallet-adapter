@@ -365,27 +365,39 @@ if (result?.approved) {
 2. Wallet extension shows consent popup
 3. Wallet responds with `credential-wallet:sign-response` + nonce + result
 
-### `requestAuth(wallet, request, options?): Promise<AuthResponse | null>`
+### `requestAuth(wallet, request, options?): Promise<UnverifiedAuthResponse | null>`
 
 _(v0.5.0+)_ DID-based authentication — the "Sign in with Attestto" primitive. The wallet proves control of an identity DID against a site-issued nonce. Mirrors `requestSignature` but with login semantics (`nonce` + `audience` + `origin`) instead of a document hash. Returns `null` if the user rejects or the timeout elapses.
 
+> **SECURITY (v0.7.0+):** the result arrives over a page `window` event that any script can forge, so `approved`/`did` are **not** proof of authentication. You **must** pass the result to [`verifyAuth`](#verifyauthresponse-options-promiseauthverifyresult) and trust only `authenticated === true`.
+
 ```ts
-import { discoverWallets, requestAuth } from '@attestto/id-wallet-adapter'
+import { discoverWallets, requestAuth, verifyAuth } from '@attestto/id-wallet-adapter'
 
 const [wallet] = await discoverWallets()
-const result = await requestAuth(wallet, {
-  nonce: crypto.randomUUID(),
-  audience: 'https://your-site.example',
-  origin: window.location.origin,
-  // Optional: declare which issuers you trust. Wallet filters/highlights matching identities.
-  trustedIssuers: ['did:sns:attestto.attestto.sol'],
-})
+const nonce = crypto.randomUUID()
+const audience = window.location.origin
+const origin = window.location.origin
 
-if (result?.approved) {
-  console.log('Signed in as', result.did)
-  // result.signature, result.publicKeyJwk, result.timestamp also present
+const result = await requestAuth(wallet, { nonce, audience, origin })
+if (result) {
+  const verified = await verifyAuth(result, {
+    expectedNonce: nonce,
+    expectedAudience: audience,
+    expectedOrigin: origin,
+    resolverUrl: 'https://resolver.attestto.org',
+  })
+  if (verified.authenticated) {
+    console.log('Signed in as', verified.did) // only trustworthy after verifyAuth
+  } else {
+    console.warn('Auth rejected:', verified.errors)
+  }
 }
 ```
+
+### `verifyAuth(response, options): Promise<AuthVerifyResult>`
+
+_(v0.7.0+)_ The mandatory verifier for `requestAuth`. Fail-closed, it (1) verifies the signature over the canonical payload (`canonicalAuthMessage`, version `attestto-did-auth-v1`) with zero-dependency WebCrypto (Ed25519 / ES256), (2) resolves the DID and confirms the signing key is in the DID Document's `authentication` relationship, and (3) checks nonce/audience/origin binding + freshness (`maxAgeSeconds`, default 300). Returns `{ authenticated, did, errors }`.
 
 **Request:**
 
