@@ -243,7 +243,7 @@ function extractIssuer(vc: Record<string, unknown>): string | null {
   return null
 }
 
-async function resolveDid(did: string, resolverUrl: string, signal?: AbortSignal): Promise<Record<string, unknown> | null> {
+export async function resolveDid(did: string, resolverUrl: string, signal?: AbortSignal): Promise<Record<string, unknown> | null> {
   const res = await fetch(`${resolverUrl}/1.0/identifiers/${encodeURIComponent(did)}`, { signal })
   if (!res.ok) return null
   const data = await res.json() as { didDocument?: Record<string, unknown> }

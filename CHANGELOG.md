@@ -4,6 +4,19 @@ All notable changes to `@attestto/id-wallet-adapter` will be documented in this 
 
 This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-07-19
+
+### Security
+- **`verifyAuth` — the mandatory verifier for the DID-login (`requestAuth`) path (SOC-28).** `requestAuth` resolves with data from a page `window` event that any script can forge, so `approved`/`did` are **not** an authentication result. `verifyAuth(response, { expectedNonce, expectedAudience, expectedOrigin, resolverUrl, maxAgeSeconds? })` is now the trust boundary and, fail-closed, (a) verifies the signature over the canonical payload with zero-dependency WebCrypto (Ed25519 and ES256/P-256), (b) resolves the DID and confirms the signing key is in the DID Document's `authentication` relationship, and (c) checks nonce/audience/origin binding + freshness. Only `authenticated === true` proves the DID.
+- The canonical signed payload is defined and exported as `canonicalAuthMessage` / `DID_AUTH_CANONICAL_VERSION` (`attestto-did-auth-v1`) — the cross-repo contract wallets must sign. Error codes: `EXPECTED_PARAMS_MISSING`, `NOT_APPROVED`, `MISSING_FIELDS`, `NONCE_MISMATCH`, `AUDIENCE_MISMATCH`, `ORIGIN_MISMATCH`, `STALE`, `UNSUPPORTED_KEY`, `SIGNATURE_INVALID`, `RESOLUTION_FAILED`, `KEY_NOT_IN_AUTHENTICATION`.
+
+### Added
+- `AuthResponse` now echoes the signed `nonce`/`audience`/`origin` (so a binding mismatch is reported precisely), and `UnverifiedAuthResponse` (alias) documents that a raw `requestAuth` result is unverified until `verifyAuth` confirms it. `requestAuth` is retyped to return `UnverifiedAuthResponse`. README example updated to call `verifyAuth`.
+- 8 tests using a real WebCrypto Ed25519 key + stubbed resolver (122 total).
+
+### Notes
+- Wallet counterpart is not yet implemented — `attestto-creds-extension` must sign `canonicalAuthMessage` for real auth responses to verify (tracked as a follow-up). The `requestSignature`/`SignResponse` path is still returned unverified (deferred follow-up).
+
 ## [0.6.0] - 2026-07-19
 
 ### Security
