@@ -73,6 +73,12 @@ export interface SignRequest {
   hashAlgorithm: string
   /** Optional file size in bytes (for display) */
   fileSize?: number
+  /**
+   * Optional list of issuer DIDs the verifier will accept. The wallet uses
+   * this to filter the user's identities and highlight matches. Empty or
+   * omitted = wallet shows all identities (site accepts any issuer).
+   */
+  trustedIssuers?: string[]
 }
 
 /** What the wallet returns after user consents */
@@ -107,4 +113,56 @@ export interface SignResponseDetail {
   nonce: string
   /** The signing result */
   response: SignResponse
+}
+
+// ---------------------------------------------------------------------------
+// Authentication (DID-based login)
+// ---------------------------------------------------------------------------
+
+/** What the site wants the user to prove in a login flow */
+export interface AuthRequest {
+  /** Nonce the wallet signs to prove possession of the identity key */
+  nonce: string
+  /** Audience — the verifier's identifier (origin or DID) */
+  audience: string
+  /** Origin requesting the auth (shown in consent popup) */
+  origin: string
+  /**
+   * Optional list of issuer DIDs the verifier will accept. The wallet uses
+   * this to filter the user's identities and highlight matches. Empty or
+   * omitted = wallet shows all identities (site accepts any issuer).
+   */
+  trustedIssuers?: string[]
+}
+
+/** What the wallet returns after the user authenticates */
+export interface AuthResponse {
+  /** Whether the user approved the auth request */
+  approved: boolean
+  /** The authenticated DID (present when approved) */
+  did?: string
+  /** Base64url-encoded signature over canonical payload (present when approved) */
+  signature?: string
+  /** Signer's public key in JWK format (present when approved) */
+  publicKeyJwk?: JsonWebKey
+  /** ISO 8601 timestamp the signature was created (present when approved) */
+  timestamp?: string
+}
+
+/** Payload of the auth event (site → wallet) */
+export interface AuthDetail {
+  /** Nonce to correlate request → response (envelope-level) */
+  nonce: string
+  /** DID of the target wallet */
+  walletDid: string
+  /** The authentication request */
+  request: AuthRequest
+}
+
+/** Payload of the auth-response event (wallet → site) */
+export interface AuthResponseDetail {
+  /** Correlates to the auth envelope nonce */
+  nonce: string
+  /** The authentication result */
+  response: AuthResponse
 }
