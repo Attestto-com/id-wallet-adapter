@@ -120,21 +120,36 @@ const files = changedFiles(ref);
 if (files === null) process.exit(0);
 
 const changedSource = files.filter(isSource);
-if (changedSource.length === 0) {
-  console.log(`Changelog gate skipped: no changes under ${SOURCE_PATHS.join(', ')} against ${ref}.`);
-  process.exit(0);
-}
 
 // --- check 1: src/** changed, CHANGELOG.md did not -------------------------
+//
+// ONLY THIS CHECK depends on source having changed. Checks 2 and 3 run on every
+// pull request.
+//
+// This script originally exited 0 right here when no source had changed, which
+// put the version-match and em-dash checks behind a condition that a release
+// PR never meets. A commit that bumps `version` and adds a changelog heading
+// touches no source at all, so the one change that can desynchronise the two
+// numbers was the one change never checked — and the gate reported "skipped",
+// which reads as "nothing to enforce" rather than "enforcement disabled".
+// Verified by seeding a mismatched version and an em-dash: both passed.
 
-const changelogChanged = files.includes(CHANGELOG);
-if (!changelogChanged) {
-  const sample = changedSource.slice(0, 5).join(', ');
-  fail(
-    `Shipped source changed (${sample}${changedSource.length > 5 ? ', ...' : ''}) but ${CHANGELOG} was not updated. ` +
-      'Every change to shipped source needs a changelog entry. See the "changelog" skill for the house style.',
-    { file: CHANGELOG }
+if (changedSource.length === 0) {
+  console.log(
+    `No changes under ${SOURCE_PATHS.join(', ')} against ${ref}; ` +
+      'skipping the "source changed without a changelog entry" check. ' +
+      'Version match and em-dash checks still run.'
   );
+} else {
+  const changelogChanged = files.includes(CHANGELOG);
+  if (!changelogChanged) {
+    const sample = changedSource.slice(0, 5).join(', ');
+    fail(
+      `Shipped source changed (${sample}${changedSource.length > 5 ? ', ...' : ''}) but ${CHANGELOG} was not updated. ` +
+        'Every change to shipped source needs a changelog entry. See the "changelog" skill for the house style.',
+      { file: CHANGELOG }
+    );
+  }
 }
 
 // --- checks 2 and 3 require the file to exist ------------------------------
@@ -198,5 +213,9 @@ if (errors.length > 0) {
 }
 
 console.log(
-  `Changelog gate passed: ${CHANGELOG} updated alongside ${changedSource.length} source file(s), top version matches package.json, no em-dashes.`
+  changedSource.length === 0
+    ? `Changelog gate passed: top version matches package.json, no em-dashes. ` +
+        `No source changed, so the changelog-entry check did not apply.`
+    : `Changelog gate passed: ${CHANGELOG} updated alongside ${changedSource.length} source file(s), ` +
+        `top version matches package.json, no em-dashes.`
 );

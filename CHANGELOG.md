@@ -4,6 +4,17 @@ All notable changes to `@attestto/id-wallet-adapter` will be documented in this 
 
 This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Security
+- **9 Dependabot advisories closed: 5 high, 3 medium, 1 low.** `form-data` (CRLF injection), `postcss` (arbitrary file read, XSS), `vite`, `ws` (uninitialized memory disclosure) and `esbuild`. All nine are in the dev toolchain, under `vitest` / `vite` / `jsdom`. This package declares **no runtime dependencies**, so none of them reaches a consumer of the published `0.7.0`.
+- **`nanoid` bumped with no GitHub alert to prompt it.** `npm audit` rates the resolved 3.3.11 high (non-secure generators can loop indefinitely with a negative size) and 3.3.11 is inside the advisory range, but Dependabot has raised no alert on this repo. The two scanners disagree and the shorter list is the one on the repo page, so this was fixed on the audit's evidence.
+- Every floor is the advisory's first patched version, capped to its own major line, because an open-ended floor adopts the next major while still satisfying the advisory. Each resolved version was compared against its own floor rather than inferred from `npm audit` reporting zero.
+
+### Fixed
+- **`rejects a tampered signature` failed roughly 1 run in 16, and the test was the defect, not `verifyAuth`.** The helper rewrote the last two characters of the base64url signature, which is not reliably a change: the final character of an 86-character encoding carries 2 significant bits and 4 padding bits, and Ed25519's `S` scalar is reduced mod `L` below 2^252, so a signature's last byte is always under 16. When that byte was exactly 4 the branch written as a safety net (`endsWith('A') ? 'BB'`) altered padding bits only, the signature decoded byte-identical, verification correctly succeeded, and the assertion that it be rejected failed. Measured at 356 no-ops in 6000 signatures (5.93%), every one the same character pair. Now flips byte 0, inside `R`, before encoding. This was a false red and never a false green, so no defect was hidden.
+- `scripts/ci-changelog.mjs` exited 0 as soon as it found no changes under `src/`, and that early return sat above the version-match and em-dash checks. A release commit bumps `version`, adds a changelog heading and touches no source, so the one kind of change that can desynchronise `package.json` from `CHANGELOG.md` was the one kind never checked. Only the changelog-entry check now depends on source having changed.
+
 ## [0.7.0] - 2026-07-19
 
 ### Security
