@@ -17,7 +17,7 @@ const NONCE = 'nonce-abc-123'
 const AUDIENCE = 'https://verifier.example'
 const ORIGIN = 'https://verifier.example'
 
-function bytesToB64url(buf: ArrayBuffer): string {
+function bytesToB64url(buf: ArrayBuffer | Uint8Array): string {
   const bytes = new Uint8Array(buf)
   let bin = ''
   for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i])
@@ -86,9 +86,22 @@ async function makeSignedResponse(overrides: {
   const timestamp = overrides.timestamp ?? new Date().toISOString()
 
   const message = canonicalAuthMessage({ did, nonce, audience, origin, timestamp })
-  const sig = await subtle.sign({ name: 'Ed25519' }, privateKey, new TextEncoder().encode(message))
-  let signature = bytesToB64url(sig)
-  if (overrides.tamperSignature) signature = signature.slice(0, -2) + (signature.endsWith('A') ? 'BB' : 'AA')
+  const sig = new Uint8Array(
+    await subtle.sign({ name: 'Ed25519' }, privateKey, new TextEncoder().encode(message)),
+  )
+  // Tamper the BYTES, before encoding. The previous version rewrote the last
+  // two base64url characters, which is not reliably a change at all: the final
+  // character of an 86-char encoding carries 2 significant bits and 4 padding
+  // bits, and Ed25519's S scalar is reduced mod L < 2^252, so a signature's
+  // last byte is always < 16 and the second-to-last character only ever takes
+  // 4 values. When that last byte was exactly 4 the guard branch
+  // (`endsWith('A') ? 'BB'`) altered padding bits only, the decoded signature
+  // came back byte-identical, verification correctly succeeded, and the test
+  // asserting rejection failed. Measured at 356 of 6000 signatures, 5.93%,
+  // against a predicted 1 in 16.
+  // Flipping byte 0 (inside R) always changes the signature.
+  if (overrides.tamperSignature) sig[0] ^= 0xff
+  const signature = bytesToB64url(sig)
 
   const didDocument = {
     id: did,
