@@ -23,7 +23,33 @@
     "test": "vitest",
     "test:run": "vitest run",
     "coverage": "vitest run --coverage",
+    "gate-self-test": "node scripts/gate-self-test.mjs",
     "prepublishOnly": "npm run lint && npm run test:run && npm run build"
+  },
+  "gateSelfTest": {
+    "workflow": ".github/workflows/ci.yml",
+    "testScript": "test:run",
+    "buildScript": "build",
+    "gates": [
+      {
+        "name": "type-check",
+        "script": "lint",
+        "seed": "src/__gate__.ts",
+        "content": "export const wrong: number = 'not a number'\n"
+      },
+      {
+        "name": "tests",
+        "script": "test:run",
+        "seed": "src/__gate__.spec.ts",
+        "content": "import { describe, expect, it } from 'vitest'\n\ndescribe('gate self-test seed', () => {\n  it('is a deliberate failure', () => {\n    expect(1).toBe(2)\n  })\n})\n"
+      },
+      {
+        "name": "coverage-thresholds",
+        "script": "coverage",
+        "seed": "src/policy/__gate__.ts",
+        "content": "export function neverCalledByAnySpec(value: string): string {\n  return value.toUpperCase()\n}\n"
+      }
+    ]
   },
   "keywords": [
     "did",
